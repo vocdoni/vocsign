@@ -78,18 +78,21 @@ build-darwin-arm64: prepare-output
 
 release-local: build-linux-amd64 build-windows-amd64 build-darwin-amd64 build-darwin-arm64
 
+# Pass version/commit/build-date into Docker so inner make uses them (CI sets VERSION=tag or sha).
+DOCKER_ENV_VARS := -e VERSION="$(VERSION)" -e COMMIT="$(COMMIT)" -e BUILD_DATE="$(BUILD_DATE)"
+
 # Recommended: cross-build core artifacts with Docker to avoid host toolchain drift.
 # Note: current goreleaser-cross image does not provide Darwin compilers.
 release-docker:
-	$(DOCKER) run --rm --entrypoint /bin/sh -v "$(PWD):/src" -w /src $(DOCKER_CROSS_IMAGE) -lc "export PATH=/usr/local/go/bin:$$PATH && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcursor-dev libxfixes-dev libwayland-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev && make release-inside-docker-core"
+	$(DOCKER) run --rm $(DOCKER_ENV_VARS) --entrypoint /bin/sh -v "$(PWD):/src" -w /src $(DOCKER_CROSS_IMAGE) -lc "export PATH=/usr/local/go/bin:$$PATH && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcursor-dev libxfixes-dev libwayland-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev && make release-inside-docker-core"
 	$(MAKE) release-docker-macos
 
 release-docker-core:
-	$(DOCKER) run --rm --entrypoint /bin/sh -v "$(PWD):/src" -w /src $(DOCKER_CROSS_IMAGE) -lc "export PATH=/usr/local/go/bin:$$PATH && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcursor-dev libxfixes-dev libwayland-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev && make release-inside-docker-core"
+	$(DOCKER) run --rm $(DOCKER_ENV_VARS) --entrypoint /bin/sh -v "$(PWD):/src" -w /src $(DOCKER_CROSS_IMAGE) -lc "export PATH=/usr/local/go/bin:$$PATH && apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends pkg-config libx11-dev libxkbcommon-dev libxkbcommon-x11-dev libx11-xcb-dev libxcursor-dev libxfixes-dev libwayland-dev libegl1-mesa-dev libgles2-mesa-dev libvulkan-dev && make release-inside-docker-core"
 
 # Optional macOS docker build; requires osxcross-compatible image/toolchain.
 release-docker-macos:
-	$(DOCKER) run --rm --entrypoint /bin/sh -v "$(PWD):/src" -w /src $(DOCKER_CROSS_IMAGE) -lc "export PATH=/usr/local/osxcross/bin:/usr/local/go/bin:$$PATH && go mod download && find /root/go/pkg/mod -type f -path '*/gioui.org/x@*/explorer/*' -exec sed -i 's#<Appkit/AppKit.h>#<AppKit/AppKit.h>#' {} + && find /root/go/pkg/mod -type f \( -path '*/gioui.org/x@*/explorer/*.go' -o -path '*/gioui.org/x@*/notify/macos/*.go' \) -exec sed -i 's# -fmodules##g' {} + && find /root/go/pkg/mod -type f -path '*/gioui.org/x@*/explorer/explorer_macos.go' -exec sed -i '/#cgo CFLAGS:/a #cgo LDFLAGS: -framework UniformTypeIdentifiers' {} + && make release-inside-docker-macos"
+	$(DOCKER) run --rm $(DOCKER_ENV_VARS) --entrypoint /bin/sh -v "$(PWD):/src" -w /src $(DOCKER_CROSS_IMAGE) -lc "export PATH=/usr/local/osxcross/bin:/usr/local/go/bin:$$PATH && go mod download && find /root/go/pkg/mod -type f -path '*/gioui.org/x@*/explorer/*' -exec sed -i 's#<Appkit/AppKit.h>#<AppKit/AppKit.h>#' {} + && find /root/go/pkg/mod -type f \( -path '*/gioui.org/x@*/explorer/*.go' -o -path '*/gioui.org/x@*/notify/macos/*.go' \) -exec sed -i 's# -fmodules##g' {} + && find /root/go/pkg/mod -type f -path '*/gioui.org/x@*/explorer/explorer_macos.go' -exec sed -i '/#cgo CFLAGS:/a #cgo LDFLAGS: -framework UniformTypeIdentifiers' {} + && make release-inside-docker-macos"
 
 release-inside-docker-core: clean build-linux-amd64 build-windows-amd64
 
