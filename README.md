@@ -13,7 +13,7 @@ It imports user certificates, discovers certificates from system/browser stores,
 
 ## Requirements
 
-- Go `1.25.6` (as declared in `go.mod`).
+- Go as declared in `go.mod`.
 - `cgo` enabled for full certificate discovery support.
 - Optional Docker for reproducible cross-builds.
 
@@ -28,14 +28,6 @@ go run ./cmd/vocsign
 ```
 
 ## Build
-
-From `vocsign/`:
-
-```bash
-make all
-```
-
-Useful targets:
 
 ```bash
 make build-host
@@ -69,34 +61,6 @@ Notes:
 
 - Windows browser discovery depends on NSS + `cgo` support in the built binary.
 - Native OS-store listing is currently implemented on macOS only in this repository.
-
-## Local storage model
-
-Imported identities are stored in a local file store:
-
-- Metadata: JSON (certificate, fingerprint, source reference)
-- Private key material (manual `.p12/.pfx` import): encrypted at rest
-- System/browser imported identities: stored as references (PKCS#11 or OS-native ref)
-
-## Project layout
-
-- `cmd/vocsign`: desktop app entrypoint.
-- `internal/ui`: screens, widgets, theme.
-- `internal/app`: app state and workflow orchestration.
-- `internal/crypto/pkcs12store`: PKCS#12 parsing, local store, signer resolution.
-- `internal/crypto/systemstore`: NSS/system discovery.
-- `internal/crypto/cades`: CAdES signing.
-- `internal/net`: request fetch/submit.
-- `test`: integration/unit/legal tests and test certificates.
-
-## Troubleshooting
-
-- `make all` fails with permissions in `build/`:
-  - The Makefile now auto-renames non-writable `build/` to `build.stale.<timestamp>`.
-- Windows scan finds no browser certificates:
-  - Ensure Firefox/NSS DB exists for the user profile.
-  - Ensure binary was built with `CGO_WINDOWS=1`.
-  - Optionally set `VOCSIGN_NSS_LIB` to `softokn3.dll`/`nss3.dll` path.
 
 ## License
 

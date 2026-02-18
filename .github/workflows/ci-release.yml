@@ -57,17 +57,17 @@ jobs:
 
       - name: Package core artifacts
         run: |
-          cd build
-          tar -czf vocsign-linux-amd64.tar.gz vocsign-linux-amd64
-          zip -9 vocsign-windows-amd64.zip vocsign-windows-amd64.exe
+          mkdir -p release-pack
+          tar -C build -czf release-pack/vocsign-linux-amd64.tar.gz vocsign-linux-amd64
+          zip -j -9 release-pack/vocsign-windows-amd64.zip build/vocsign-windows-amd64.exe
 
       - name: Upload core artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-core
           path: |
-            build/vocsign-linux-amd64.tar.gz
-            build/vocsign-windows-amd64.zip
+            release-pack/vocsign-linux-amd64.tar.gz
+            release-pack/vocsign-windows-amd64.zip
           if-no-files-found: error
 
   build_macos:
@@ -96,14 +96,14 @@ jobs:
 
       - name: Package macOS artifact
         run: |
-          cd build
-          tar -czf vocsign-darwin-${{ matrix.arch }}.tar.gz vocsign-darwin-${{ matrix.arch }}
+          mkdir -p release-pack
+          tar -C build -czf release-pack/vocsign-darwin-${{ matrix.arch }}.tar.gz vocsign-darwin-${{ matrix.arch }}
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-macos-${{ matrix.arch }}
-          path: build/vocsign-darwin-${{ matrix.arch }}.tar.gz
+          path: release-pack/vocsign-darwin-${{ matrix.arch }}.tar.gz
           if-no-files-found: error
 
   release:
