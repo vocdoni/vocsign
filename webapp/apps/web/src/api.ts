@@ -1,4 +1,4 @@
-import type { CreateProposalInput, ProposalDetails, ProposalListItem } from './types';
+import type { CreateProposalInput, DownloadsResponse, ProposalDetails, ProposalListItem } from './types';
 
 async function handleJSON<T>(response: Response): Promise<T> {
   if (!response.ok) {
@@ -30,4 +30,9 @@ export async function createProposal(payload: CreateProposalInput): Promise<{
 export async function getProposal(requestId: string): Promise<ProposalDetails> {
   const res = await fetch(`/api/proposals/${encodeURIComponent(requestId)}`);
   return handleJSON<ProposalDetails>(res);
+}
+
+export async function getDownloads(): Promise<DownloadsResponse> {
+  const res = await fetch('/api/downloads');
+  return handleJSON<DownloadsResponse>(res);
 }

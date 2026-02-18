@@ -14,7 +14,9 @@ import (
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/pkcs12store"
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/systemstore"
 	"github.com/vocdoni/gofirma/vocsign/internal/model"
+	appnet "github.com/vocdoni/gofirma/vocsign/internal/net"
 	"github.com/vocdoni/gofirma/vocsign/internal/storage"
+	"github.com/vocdoni/gofirma/vocsign/internal/version"
 )
 
 type Screen int
@@ -23,6 +25,7 @@ const (
 	ScreenOpenRequest Screen = iota
 	ScreenCertificates
 	ScreenAudit
+	ScreenAbout
 	ScreenRequestDetails
 	ScreenWizard
 )
@@ -31,6 +34,7 @@ type App struct {
 	mu            sync.RWMutex
 	CurrentScreen Screen
 	ShowWizard    bool
+	BuildInfo     BuildInfo
 
 	// Services
 	Store       pkcs12store.Store
@@ -52,6 +56,32 @@ type App struct {
 	// UI Actions
 	RequestURL string
 	Invalidate func()
+
+	LatestVersion   string
+	ReleasePageURL  string
+	UpdateAvailable bool
+	UpdateChecked   bool
+	UpdateCheckErr  string
+	UpdateMessage   string
+
+	updateChecking bool
+}
+
+type BuildInfo struct {
+	Version   string
+	Commit    string
+	BuildDate string
+}
+
+type UpdateStatus struct {
+	CurrentVersion string
+	LatestVersion  string
+	ReleasePageURL string
+	Available      bool
+	Checked        bool
+	Checking       bool
+	Error          string
+	Message        string
 }
 
 func (a *App) SystemIdentitiesSnapshot() []pkcs12store.Identity {
@@ -76,6 +106,85 @@ func (a *App) SetIdentities(ids []pkcs12store.Identity) {
 	out := make([]pkcs12store.Identity, len(ids))
 	copy(out, ids)
 	a.Identities = out
+}
+
+func (a *App) UpdateStatusSnapshot() UpdateStatus {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	return UpdateStatus{
+		CurrentVersion: a.BuildInfo.Version,
+		LatestVersion:  a.LatestVersion,
+		ReleasePageURL: a.ReleasePageURL,
+		Available:      a.UpdateAvailable,
+		Checked:        a.UpdateChecked,
+		Checking:       a.updateChecking,
+		Error:          a.UpdateCheckErr,
+		Message:        a.UpdateMessage,
+	}
+}
+
+func (a *App) StartUpdateCheck() {
+	a.runUpdateCheck(false)
+}
+
+func (a *App) CheckUpdatesNow() {
+	a.runUpdateCheck(true)
+}
+
+func (a *App) runUpdateCheck(force bool) {
+	a.mu.Lock()
+	if a.updateChecking {
+		a.mu.Unlock()
+		return
+	}
+	if !force && a.UpdateChecked {
+		log.Printf("DEBUG: update check skipped (already checked)")
+		a.mu.Unlock()
+		return
+	}
+	a.updateChecking = true
+	a.UpdateMessage = "Checking for updates..."
+	a.mu.Unlock()
+	log.Printf("DEBUG: update check started (current=%s force=%v)", a.BuildInfo.Version, force)
+
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+		defer cancel()
+
+		latest, releaseURL, err := appnet.FetchLatestRelease(ctx)
+
+		a.mu.Lock()
+		a.updateChecking = false
+		a.UpdateChecked = true
+		if err != nil {
+			log.Printf("DEBUG: update check failed: %v", err)
+			a.UpdateCheckErr = err.Error()
+			a.UpdateMessage = "Update check failed"
+			a.mu.Unlock()
+			if a.Invalidate != nil {
+				a.Invalidate()
+			}
+			return
+		}
+		a.UpdateCheckErr = ""
+		a.LatestVersion = latest
+		if releaseURL != "" {
+			a.ReleasePageURL = releaseURL
+		}
+		a.UpdateAvailable = version.IsOutdated(a.BuildInfo.Version, latest)
+		if a.UpdateAvailable {
+			a.UpdateMessage = "New version available: " + latest
+			log.Printf("DEBUG: update check result: outdated current=%s latest=%s", a.BuildInfo.Version, latest)
+		} else {
+			a.UpdateMessage = "You are using the latest version"
+			log.Printf("DEBUG: update check result: up-to-date current=%s latest=%s", a.BuildInfo.Version, latest)
+		}
+		a.mu.Unlock()
+
+		if a.Invalidate != nil {
+			a.Invalidate()
+		}
+	}()
 }
 
 func (a *App) ScanSystemStores(ctx context.Context) {
@@ -141,7 +250,7 @@ func safeList(fn func(context.Context) ([]pkcs12store.Identity, error), ctx cont
 	return fn(ctx)
 }
 
-func NewApp() (*App, error) {
+func NewApp(build BuildInfo) (*App, error) {
 	home, err := os.UserHomeDir()
 	if err != nil {
 		return nil, fmt.Errorf("failed to get home dir: %w", err)
@@ -167,6 +276,12 @@ func NewApp() (*App, error) {
 		CurrentScreen: ScreenOpenRequest,
 		AuditLogger:   logger,
 		Store:         store,
+		BuildInfo: BuildInfo{
+			Version:   nonEmpty(build.Version, "dev"),
+			Commit:    nonEmpty(build.Commit, "unknown"),
+			BuildDate: nonEmpty(build.BuildDate, "unknown"),
+		},
+		ReleasePageURL: appnet.LatestReleasePageURL,
 	}
 
 	// Initial load
@@ -179,4 +294,11 @@ func NewApp() (*App, error) {
 	}
 
 	return app, nil
+}
+
+func nonEmpty(value, fallback string) string {
+	if value == "" {
+		return fallback
+	}
+	return value
 }

@@ -15,6 +15,7 @@ Production-oriented collector portal for creating signature proposals and tracki
 - Proposal dashboard with sorting by recent or signature count.
 - Proposal page with signing URL, progress bar, and signature count.
 - Embedded participation guide with Vocsign binary download link.
+- Embedded participation guide with direct latest-release download links for Windows, macOS (Intel/Apple Silicon), and Linux.
 - Callback endpoint to store signatures and signer accountability metadata.
 - Per-proposal signer uniqueness by ID (one ID can sign only once).
 - Signer identity details are stored privately and not exposed in public endpoints.
@@ -52,6 +53,7 @@ Use `.env.example` as reference:
 - `POLICY_OID`
 - `POLICY_URI`
 - `DEFAULT_PROPOSAL_VALIDITY_DAYS`
+- `VOCSIGN_RELEASE_BASE_URL` (optional, defaults to `https://github.com/vocdoni/vocsign/releases/latest`)
 
 ## Generate organizer private key (hex)
 

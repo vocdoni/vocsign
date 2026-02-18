@@ -12,12 +12,22 @@ import (
 	"github.com/vocdoni/gofirma/vocsign/internal/ui"
 )
 
+var (
+	version   = "dev"
+	commit    = "unknown"
+	buildDate = "unknown"
+)
+
 func main() {
 	if len(os.Args) > 1 && os.Args[1] == "--nss-scan-worker" {
 		os.Exit(systemstore.RunNSSScanWorker(os.Args[2:]))
 	}
 
-	vocsignApp, err := app.NewApp()
+	vocsignApp, err := app.NewApp(app.BuildInfo{
+		Version:   version,
+		Commit:    commit,
+		BuildDate: buildDate,
+	})
 	if err != nil {
 		log.Fatalf("Failed to initialize app: %v", err)
 	}

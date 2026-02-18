@@ -19,6 +19,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -51,9 +53,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Build Linux and Windows binaries (Docker cross toolchain)
-        run: make release-docker-core
+        run: make release-docker-core VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
 
       - name: Package core artifacts
         run: |
@@ -85,6 +89,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Setup Go
         uses: actions/setup-go@v5
@@ -92,7 +98,7 @@ jobs:
           go-version-file: go.mod
 
       - name: Build host macOS binary
-        run: make build-host
+        run: make build-host VERSION=${{ github.ref_type == 'tag' && github.ref_name || github.sha }}
 
       - name: Package macOS artifact
         run: |

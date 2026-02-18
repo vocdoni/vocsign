@@ -9,6 +9,7 @@ import (
 	gioapp "gioui.org/app"
 	"gioui.org/layout"
 	"gioui.org/op"
+	"gioui.org/op/clip"
 	"gioui.org/op/paint"
 	"gioui.org/unit"
 	"gioui.org/widget"
@@ -25,6 +26,7 @@ import (
 func Run(w *gioapp.Window, a *app.App) error {
 	a.Explorer = explorer.NewExplorer(w)
 	a.Invalidate = w.Invalidate
+	a.StartUpdateCheck()
 	th := NewTheme()
 	var ops op.Ops
 
@@ -40,14 +42,18 @@ func Run(w *gioapp.Window, a *app.App) error {
 	openReqScreen := screens.NewOpenRequestScreen(a, th)
 	reqDetailsScreen := screens.NewRequestDetailsScreen(a, th)
 	auditScreen := screens.NewAuditScreen(a, th)
+	aboutScreen := screens.NewAboutScreen(a, th)
 	wizardScreen := screens.NewWizardScreen(a, th)
 
 	// Navigation state
 	var (
-		tabCert   widget.Clickable
-		tabOpen   widget.Clickable
-		tabAudit  widget.Clickable
-		logoClick widget.Clickable
+		tabCert     widget.Clickable
+		tabOpen     widget.Clickable
+		tabAudit    widget.Clickable
+		tabAbout    widget.Clickable
+		logoClick   widget.Clickable
+		updateClick widget.Clickable
+		checkNow    widget.Clickable
 	)
 
 	lastScreen := a.CurrentScreen
@@ -62,6 +68,7 @@ func Run(w *gioapp.Window, a *app.App) error {
 		case gioapp.FrameEvent:
 			// log.Printf("DEBUG: FrameEvent received")
 			gtx := gioapp.NewContext(&ops, e)
+			paint.FillShape(gtx.Ops, th.Palette.Bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 
 			// Handle Navigation
 			if tabCert.Clicked(gtx) {
@@ -73,8 +80,20 @@ func Run(w *gioapp.Window, a *app.App) error {
 			if tabAudit.Clicked(gtx) {
 				a.CurrentScreen = app.ScreenAudit
 			}
+			if tabAbout.Clicked(gtx) {
+				a.CurrentScreen = app.ScreenAbout
+			}
 			if logoClick.Clicked(gtx) {
 				widgets.OpenURL("https://vocdoni.io")
+			}
+			if updateClick.Clicked(gtx) {
+				st := a.UpdateStatusSnapshot()
+				if st.ReleasePageURL != "" {
+					widgets.OpenURL(st.ReleasePageURL)
+				}
+			}
+			if checkNow.Clicked(gtx) {
+				a.CheckUpdatesNow()
 			}
 
 			// Screen transition logic
@@ -96,6 +115,8 @@ func Run(w *gioapp.Window, a *app.App) error {
 				current = reqDetailsScreen.Layout
 			case app.ScreenAudit:
 				current = auditScreen.Layout
+			case app.ScreenAbout:
+				current = aboutScreen.Layout
 			case app.ScreenWizard:
 				current = wizardScreen.Layout
 			default:
@@ -104,13 +125,15 @@ func Run(w *gioapp.Window, a *app.App) error {
 
 			// Main Background & App Border
 			layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return widgets.Section(gtx, th.Palette.Bg, func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if a.CurrentScreen == app.ScreenWizard {
-								return layout.Dimensions{}
-							}
-							return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				// widgets.Section/Card paint against Constraints.Min; enforce full-area paint.
+				gtx.Constraints.Min = gtx.Constraints.Max
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if a.CurrentScreen == app.ScreenWizard {
+							return layout.Dimensions{}
+						}
+						return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -129,59 +152,150 @@ func Run(w *gioapp.Window, a *app.App) error {
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											return navTab(gtx, th, &tabAudit, icons.IconAudit, "Audit", a.CurrentScreen == app.ScreenAudit)
 										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return navTab(gtx, th, &tabAbout, icons.IconAbout, "About", a.CurrentScreen == app.ScreenAbout)
+										}),
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} }),
 									)
 								})
 							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if a.CurrentScreen == app.ScreenWizard {
+							return layout.Dimensions{}
+						}
+						return widgets.VerticalDivider(gtx, color.NRGBA{R: 0xE5, G: 0xEB, B: 0xF5, A: 0xFF})
+					}),
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 							if a.CurrentScreen == app.ScreenWizard {
-								return layout.Dimensions{}
+								return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
+									return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
+								})
 							}
-							return widgets.VerticalDivider(gtx, color.NRGBA{R: 0xE5, G: 0xEB, B: 0xF5, A: 0xFF})
-						}),
-						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								if a.CurrentScreen == app.ScreenWizard {
-									return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
-										return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
-									})
-								}
+							return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
 							})
-						}),
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							if a.CurrentScreen == app.ScreenWizard {
-								return layout.Dimensions{}
-							}
-							return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if a.CurrentScreen == app.ScreenWizard {
+							return layout.Dimensions{}
+						}
+						return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-											l := material.Caption(th, "Secure signatures with official certificates")
-											l.Color = color.NRGBA{R: 0x5F, G: 0x6E, B: 0x84, A: 0xFF}
-											return l.Layout(gtx)
-										}),
+									gtx.Constraints.Min.X = gtx.Constraints.Max.X
+									logoAndStatement := func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												if err != nil {
+													return layout.Dimensions{}
+												}
+												return material.Clickable(gtx, &logoClick, func(gtx layout.Context) layout.Dimensions {
+													gtx.Constraints.Max.X = gtx.Dp(288)
+													gtx.Constraints.Max.Y = gtx.Dp(84)
+													return widget.Image{Src: logoOp, Fit: widget.Contain}.Layout(gtx)
+												})
+											}),
+											layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												l := material.Caption(th, "Secure signatures with official certificates")
+												l.Color = color.NRGBA{R: 0x5F, G: 0x6E, B: 0x84, A: 0xFF}
+												return l.Layout(gtx)
+											}),
+										)
+									}
+									compact := gtx.Constraints.Max.X < gtx.Dp(unit.Dp(980))
+									if compact {
+										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+											layout.Rigid(logoAndStatement),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+													return footerVersionStatus(gtx, th, a, &updateClick, &checkNow)
+												})
+											}),
+										)
+									}
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Spacing: layout.SpaceBetween}.Layout(gtx,
+										layout.Rigid(logoAndStatement),
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											if err != nil {
-												return layout.Dimensions{}
-											}
-											return material.Clickable(gtx, &logoClick, func(gtx layout.Context) layout.Dimensions {
-												gtx.Constraints.Max.X = gtx.Dp(288)
-												gtx.Constraints.Max.Y = gtx.Dp(84)
-												return widget.Image{Src: logoOp, Fit: widget.Contain}.Layout(gtx)
-											})
+											return footerVersionStatus(gtx, th, a, &updateClick, &checkNow)
 										}),
 									)
 								})
 							})
-						}),
-					)
-				})
+						})
+					}),
+				)
 			})
 
 			e.Frame(gtx.Ops)
 		}
 	}
+}
+
+func footerVersionStatus(gtx layout.Context, th *material.Theme, a *app.App, updateClick, checkNow *widget.Clickable) layout.Dimensions {
+	status := a.UpdateStatusSnapshot()
+	msg := status.Message
+	if msg == "" && status.Checked && !status.Available && status.Error == "" {
+		msg = "You are using the latest version"
+	}
+	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						l := material.Caption(th, "Version "+status.CurrentVersion)
+						l.Color = color.NRGBA{R: 0x5F, G: 0x6E, B: 0x84, A: 0xFF}
+						return l.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						label := "Check now"
+						if status.Checking {
+							label = "Checking..."
+						}
+						btn := widgets.SecondaryButton(th, checkNow, label)
+						btn.TextSize = unit.Sp(12)
+						return btn.Layout(gtx)
+					}),
+					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if !status.Available {
+							return layout.Dimensions{}
+						}
+						return material.Clickable(gtx, updateClick, func(gtx layout.Context) layout.Dimensions {
+							l := material.Caption(th, "Download update")
+							l.Color = color.NRGBA{R: 0x9A, G: 0x34, B: 0x12, A: 0xFF}
+							return l.Layout(gtx)
+						})
+					}),
+				)
+			})
+		}),
+		layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			if msg == "" {
+				return layout.Dimensions{}
+			}
+			return layout.E.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				l := material.Caption(th, msg)
+				l.Color = color.NRGBA{R: 0x16, G: 0x65, B: 0x34, A: 0xFF}
+				if status.Error != "" {
+					l.Color = color.NRGBA{R: 0xB9, G: 0x1C, B: 0x1C, A: 0xFF}
+				} else if status.Available {
+					l.Color = color.NRGBA{R: 0x9A, G: 0x34, B: 0x12, A: 0xFF}
+				} else if status.Checking {
+					l.Color = color.NRGBA{R: 0x1E, G: 0x40, B: 0xAF, A: 0xFF}
+				}
+				return l.Layout(gtx)
+			})
+		}),
+	)
 }
 
 func navTab(gtx layout.Context, th *material.Theme, click *widget.Clickable, icon *widget.Icon, label string, active bool) layout.Dimensions {

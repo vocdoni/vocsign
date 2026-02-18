@@ -34,6 +34,7 @@ const organizerKeyHex = process.env.ORGANIZER_PRIVATE_KEY_HEX ?? '';
 const policyOID = process.env.POLICY_OID ?? '1.3.6.1.4.1.47443.8.1.1';
 const policyURI = process.env.POLICY_URI ?? `${publicBaseURL}/policy.pdf`;
 const defaultValidityDays = Number(process.env.DEFAULT_PROPOSAL_VALIDITY_DAYS ?? 365);
+const releaseBaseURL = process.env.VOCSIGN_RELEASE_BASE_URL ?? 'https://github.com/vocdoni/vocsign/releases/latest';
 
 type JWKPublicEC = {
   kty: 'EC';
@@ -144,6 +145,43 @@ app.use(express.json({ limit: '2mb' }));
 
 app.get('/api/health', (_req, res) => {
   res.json({ ok: true });
+});
+
+app.get('/api/downloads', (_req, res) => {
+  const download = `${releaseBaseURL.replace(/\/$/, '')}/download`;
+  res.json({
+    releasesPage: releaseBaseURL,
+    binaries: [
+      {
+        id: 'windows-amd64',
+        os: 'Windows',
+        arch: 'x64',
+        filename: 'vocsign-windows-amd64.exe',
+        url: `${download}/vocsign-windows-amd64.exe`
+      },
+      {
+        id: 'macos-amd64',
+        os: 'macOS',
+        arch: 'Intel',
+        filename: 'vocsign-darwin-amd64',
+        url: `${download}/vocsign-darwin-amd64`
+      },
+      {
+        id: 'macos-arm64',
+        os: 'macOS',
+        arch: 'Apple Silicon',
+        filename: 'vocsign-darwin-arm64',
+        url: `${download}/vocsign-darwin-arm64`
+      },
+      {
+        id: 'linux-amd64',
+        os: 'Linux',
+        arch: 'x64',
+        filename: 'vocsign-linux-amd64',
+        url: `${download}/vocsign-linux-amd64`
+      }
+    ]
+  });
 });
 
 app.get('/jwks.json', (_req, res) => {

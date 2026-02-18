@@ -69,3 +69,16 @@ export interface CreateProposalInput {
     fullTextURL: string;
   };
 }
+
+export interface DownloadBinary {
+  id: string;
+  os: string;
+  arch: string;
+  filename: string;
+  url: string;
+}
+
+export interface DownloadsResponse {
+  releasesPage: string;
+  binaries: DownloadBinary[];
+}

@@ -18,6 +18,7 @@ var (
 	IconError        *widget.Icon
 	IconWarning      *widget.Icon
 	IconLaunch       *widget.Icon
+	IconAbout        *widget.Icon
 )
 
 func init() {
@@ -43,4 +44,5 @@ func init() {
 	IconError = loadIcon(icons.AlertError, "IconError")
 	IconWarning = loadIcon(icons.AlertWarning, "IconWarning")
 	IconLaunch = loadIcon(icons.ActionLaunch, "IconLaunch")
+	IconAbout = loadIcon(icons.ActionInfo, "IconAbout")
 }

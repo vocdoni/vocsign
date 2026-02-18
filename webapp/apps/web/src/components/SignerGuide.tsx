@@ -1,10 +1,23 @@
+import { useEffect, useState } from 'react';
 import { CheckCircle2, Download, ExternalLink, FileCheck2, Link2, ShieldCheck } from 'lucide-react';
+
+import { getDownloads } from '../api';
+import type { DownloadsResponse } from '../types';
 
 interface SignerGuideProps {
   signingURL?: string;
 }
 
 export function SignerGuide({ signingURL }: SignerGuideProps): JSX.Element {
+  const [downloads, setDownloads] = useState<DownloadsResponse | null>(null);
+  const [downloadsError, setDownloadsError] = useState('');
+
+  useEffect(() => {
+    getDownloads()
+      .then(setDownloads)
+      .catch((err: unknown) => setDownloadsError(err instanceof Error ? err.message : 'Could not load download links'));
+  }, []);
+
   return (
     <section className="guide-card">
       <h3>How to participate as a signer</h3>
@@ -13,9 +26,9 @@ export function SignerGuide({ signingURL }: SignerGuideProps): JSX.Element {
         <li>
           <Download size={16} />
           <span>
-            Download Vocsign binaries from{' '}
-            <a href="https://github.com/vocdoni/vocsign/tree/main/build" target="_blank" rel="noreferrer">
-              GitHub build artifacts <ExternalLink size={14} />
+            Download Vocsign from the{' '}
+            <a href={downloads?.releasesPage ?? 'https://github.com/vocdoni/vocsign/releases/latest'} target="_blank" rel="noreferrer">
+              latest release page <ExternalLink size={14} />
             </a>
             .
           </span>
@@ -37,6 +50,15 @@ export function SignerGuide({ signingURL }: SignerGuideProps): JSX.Element {
           <span>Confirm signature. Your signature count appears on this page immediately.</span>
         </li>
       </ol>
+      <div className="download-grid">
+        {(downloads?.binaries ?? []).map((binary) => (
+          <a key={binary.id} className="btn btn-secondary" href={binary.url} target="_blank" rel="noreferrer">
+            <Download size={15} />
+            {binary.os} ({binary.arch})
+          </a>
+        ))}
+      </div>
+      {downloadsError ? <p className="error-box">{downloadsError}</p> : null}
       {signingURL ? (
         <div className="sign-url-box">
           <p>Signing URL</p>

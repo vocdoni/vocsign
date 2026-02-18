@@ -1,5 +1,7 @@
 APP_NAME := vocsign
-VERSION := 0.1.0
+VERSION ?= $(shell git describe --tags --always --dirty 2>/dev/null || echo dev)
+COMMIT ?= $(shell git rev-parse --short HEAD 2>/dev/null || echo unknown)
+BUILD_DATE ?= $(shell date -u +"%Y-%m-%dT%H:%M:%SZ")
 OUTPUT_DIR := build
 PKG := ./cmd/vocsign
 
@@ -15,7 +17,7 @@ CGO_DARWIN ?= 1
 MACOSX_DEPLOYMENT_TARGET_AMD64 ?= 11.0
 MACOSX_DEPLOYMENT_TARGET_ARM64 ?= 11.0
 
-LD_FLAGS_COMMON := -s -w
+LD_FLAGS_COMMON := -s -w -X 'main.version=$(VERSION)' -X 'main.commit=$(COMMIT)' -X 'main.buildDate=$(BUILD_DATE)'
 WIN_GUI_FLAGS := -H=windowsgui
 GO_BUILD_FLAGS := -buildvcs=false
 
