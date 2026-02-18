@@ -58,16 +58,16 @@ jobs:
       - name: Package core artifacts
         run: |
           mkdir -p release-pack
-          tar -C build -czf release-pack/vocsign-linux-amd64.tar.gz vocsign-linux-amd64
-          zip -j -9 release-pack/vocsign-windows-amd64.zip build/vocsign-windows-amd64.exe
+          cp build/vocsign-linux-amd64 release-pack/vocsign-linux-amd64
+          cp build/vocsign-windows-amd64.exe release-pack/vocsign-windows-amd64.exe
 
       - name: Upload core artifacts
         uses: actions/upload-artifact@v4
         with:
           name: release-core
           path: |
-            release-pack/vocsign-linux-amd64.tar.gz
-            release-pack/vocsign-windows-amd64.zip
+            release-pack/vocsign-linux-amd64
+            release-pack/vocsign-windows-amd64.exe
           if-no-files-found: error
 
   build_macos:
@@ -97,13 +97,13 @@ jobs:
       - name: Package macOS artifact
         run: |
           mkdir -p release-pack
-          tar -C build -czf release-pack/vocsign-darwin-${{ matrix.arch }}.tar.gz vocsign-darwin-${{ matrix.arch }}
+          cp build/vocsign-darwin-${{ matrix.arch }} release-pack/vocsign-darwin-${{ matrix.arch }}
 
       - name: Upload macOS artifact
         uses: actions/upload-artifact@v4
         with:
           name: release-macos-${{ matrix.arch }}
-          path: release-pack/vocsign-darwin-${{ matrix.arch }}.tar.gz
+          path: release-pack/vocsign-darwin-${{ matrix.arch }}
           if-no-files-found: error
 
   release:
@@ -129,23 +129,11 @@ jobs:
           merge-multiple: true
           path: release-assets
 
-      - name: Generate checksums
-        run: |
-          cd release-assets
-          for f in vocsign-*.tar.gz vocsign-*.zip; do
-            if [ -f "$f" ]; then
-              shasum -a 256 "$f" > "$f.sha256"
-            fi
-          done
-
       - name: Publish GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release-assets/vocsign-linux-amd64.tar.gz
-            release-assets/vocsign-windows-amd64.zip
-            release-assets/vocsign-darwin-*.tar.gz
-            release-assets/vocsign-linux-amd64.tar.gz.sha256
-            release-assets/vocsign-windows-amd64.zip.sha256
-            release-assets/vocsign-darwin-*.tar.gz.sha256
+            release-assets/vocsign-linux-amd64
+            release-assets/vocsign-windows-amd64.exe
+            release-assets/vocsign-darwin-*
           generate_release_notes: true
