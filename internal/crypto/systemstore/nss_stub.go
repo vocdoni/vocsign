@@ -15,7 +15,7 @@ type NSSStore struct {
 	Label      string
 }
 
-func DiscoverNSSStores() []*NSSStore {
+func DiscoverNSSStores(ctx context.Context) []*NSSStore {
 	return nil
 }
 

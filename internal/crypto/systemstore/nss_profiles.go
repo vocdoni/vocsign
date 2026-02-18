@@ -37,10 +37,106 @@ func firefoxBaseDirs() []string {
 	case "darwin":
 		return []string{filepath.Join(home, "Library", "Application Support", "Firefox")}
 	default:
-		return []string{
+		bases := []string{
+			// Standard installs
 			filepath.Join(home, ".mozilla", "firefox"),
+			// Snap (Ubuntu)
 			filepath.Join(home, "snap", "firefox", "common", ".mozilla", "firefox"),
+			// Flatpak
+			filepath.Join(home, ".var", "app", "org.mozilla.firefox", ".mozilla", "firefox"),
+			// ESR flatpak
+			filepath.Join(home, ".var", "app", "org.mozilla.firefox_esr", ".mozilla", "firefox"),
+			// LibreWolf flatpak
+			filepath.Join(home, ".var", "app", "io.gitlab.librewolf-community", ".librewolf"),
+			// LibreWolf native
+			filepath.Join(home, ".librewolf"),
+			// Waterfox native
+			filepath.Join(home, ".waterfox"),
+			// Waterfox flatpak
+			filepath.Join(home, ".var", "app", "net.waterfox.waterfox", ".waterfox"),
+			// Tor Browser (uses Firefox profile format)
+			filepath.Join(home, ".local", "share", "torbrowser", "tbb", "x86_64", "tor-browser", "Browser", "TorBrowser", "Data", "Browser"),
+			filepath.Join(home, "tor-browser", "Browser", "TorBrowser", "Data", "Browser"),
+			// Thunderbird (also uses NSS)
+			filepath.Join(home, ".thunderbird"),
+			filepath.Join(home, "snap", "thunderbird", "common", ".thunderbird"),
+			filepath.Join(home, ".var", "app", "org.mozilla.Thunderbird", ".thunderbird"),
 		}
+		// Also pick up any snap that looks like a Firefox variant
+		if snapGlobs, err := filepath.Glob(filepath.Join(home, "snap", "firefox*", "common", ".mozilla", "firefox")); err == nil {
+			bases = append(bases, snapGlobs...)
+		}
+		return bases
+	}
+}
+
+// chromiumBaseDirs returns base config directories for all Chromium-family browsers.
+func chromiumBaseDirs() []string {
+	home, _ := os.UserHomeDir()
+	switch runtime.GOOS {
+	case "windows":
+		local := localAppDataDir()
+		roaming := appDataDir()
+		return []string{
+			filepath.Join(local, "Google", "Chrome", "User Data"),
+			filepath.Join(local, "Google", "Chrome SxS", "User Data"), // Canary
+			filepath.Join(local, "BraveSoftware", "Brave-Browser", "User Data"),
+			filepath.Join(local, "Chromium", "User Data"),
+			filepath.Join(local, "Microsoft", "Edge", "User Data"),
+			filepath.Join(local, "Opera Software", "Opera Stable"),
+			filepath.Join(local, "Opera Software", "Opera GX Stable"),
+			filepath.Join(local, "Vivaldi", "User Data"),
+			filepath.Join(roaming, "Opera Software", "Opera Stable"),
+		}
+	case "darwin":
+		appSupport := filepath.Join(home, "Library", "Application Support")
+		return []string{
+			filepath.Join(appSupport, "Google", "Chrome"),
+			filepath.Join(appSupport, "Google", "Chrome Canary"),
+			filepath.Join(appSupport, "BraveSoftware", "Brave-Browser"),
+			filepath.Join(appSupport, "Chromium"),
+			filepath.Join(appSupport, "Microsoft Edge"),
+			filepath.Join(appSupport, "com.operasoftware.Opera"),
+			filepath.Join(appSupport, "Vivaldi"),
+		}
+	default:
+		cfg := filepath.Join(home, ".config")
+		bases := []string{
+			filepath.Join(cfg, "google-chrome"),
+			filepath.Join(cfg, "google-chrome-beta"),
+			filepath.Join(cfg, "google-chrome-unstable"),
+			filepath.Join(cfg, "BraveSoftware", "Brave-Browser"),
+			filepath.Join(cfg, "BraveSoftware", "Brave-Browser-Beta"),
+			filepath.Join(cfg, "BraveSoftware", "Brave-Browser-Nightly"),
+			filepath.Join(cfg, "chromium"),
+			filepath.Join(cfg, "microsoft-edge"),
+			filepath.Join(cfg, "microsoft-edge-beta"),
+			filepath.Join(cfg, "microsoft-edge-dev"),
+			filepath.Join(cfg, "opera"),
+			filepath.Join(cfg, "vivaldi"),
+			filepath.Join(cfg, "yandex-browser"),
+			filepath.Join(cfg, "thorium"),
+			filepath.Join(cfg, "ungoogled-chromium"),
+			// Snap paths
+			filepath.Join(home, "snap", "brave", "common", ".config", "BraveSoftware", "Brave-Browser"),
+			filepath.Join(home, "snap", "chromium", "common", "chromium"),
+		}
+		// Generic snap chromium-family glob
+		if snapGlobs, err := filepath.Glob(filepath.Join(home, "snap", "chromium*", "common", "chromium")); err == nil {
+			bases = append(bases, snapGlobs...)
+		}
+		// Flatpak paths
+		flatpakBases := []string{
+			filepath.Join(home, ".var", "app", "com.google.Chrome", "config", "google-chrome"),
+			filepath.Join(home, ".var", "app", "com.google.ChromeDev", "config", "google-chrome-unstable"),
+			filepath.Join(home, ".var", "app", "com.brave.Browser", "config", "BraveSoftware", "Brave-Browser"),
+			filepath.Join(home, ".var", "app", "org.chromium.Chromium", "config", "chromium"),
+			filepath.Join(home, ".var", "app", "com.microsoft.Edge", "config", "microsoft-edge"),
+			filepath.Join(home, ".var", "app", "com.opera.Opera", "config", "opera"),
+			filepath.Join(home, ".var", "app", "com.vivaldi.Vivaldi", "config", "vivaldi"),
+		}
+		bases = append(bases, flatpakBases...)
+		return bases
 	}
 }
 
@@ -81,6 +177,7 @@ func discoverFirefoxProfileDirs() []string {
 			add(p.absPath)
 		}
 
+		// Fallback: walk the base dir for any profile-shaped subdirectory
 		entries, _ := os.ReadDir(base)
 		for _, entry := range entries {
 			if !entry.IsDir() {
@@ -94,12 +191,19 @@ func discoverFirefoxProfileDirs() []string {
 
 func isFirefoxProfileDir(dir string) bool {
 	if _, err := os.Stat(filepath.Join(dir, "cert9.db")); err != nil {
-		return false
+		// Also accept legacy cert8.db-only profiles
+		if _, err2 := os.Stat(filepath.Join(dir, "cert8.db")); err2 != nil {
+			return false
+		}
 	}
 	if _, err := os.Stat(filepath.Join(dir, "key4.db")); err == nil {
 		return true
 	}
 	if _, err := os.Stat(filepath.Join(dir, "key3.db")); err == nil {
+		return true
+	}
+	// Accept cert9.db alone (some minimal profiles have no key db yet)
+	if _, err := os.Stat(filepath.Join(dir, "cert9.db")); err == nil {
 		return true
 	}
 	return false
@@ -263,6 +367,8 @@ func findNSSLibFromFirefoxCompatibility() string {
 			filepath.Join(lastPlatformDir, "nss3.dll"),
 			filepath.Join(lastPlatformDir, "libsoftokn3.dylib"),
 			filepath.Join(lastPlatformDir, "libnss3.dylib"),
+			filepath.Join(lastPlatformDir, "libsoftokn3.so"),
+			filepath.Join(lastPlatformDir, "libnss3.so"),
 		}
 		for _, c := range candidates {
 			if _, err := os.Stat(c); err == nil {
@@ -273,24 +379,3 @@ func findNSSLibFromFirefoxCompatibility() string {
 	return ""
 }
 
-func localAppDataDir() string {
-	if runtime.GOOS != "windows" {
-		return ""
-	}
-	if v := os.Getenv("LOCALAPPDATA"); v != "" {
-		return v
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "AppData", "Local")
-}
-
-func appDataDir() string {
-	if runtime.GOOS != "windows" {
-		return ""
-	}
-	if v := os.Getenv("APPDATA"); v != "" {
-		return v
-	}
-	home, _ := os.UserHomeDir()
-	return filepath.Join(home, "AppData", "Roaming")
-}

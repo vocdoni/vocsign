@@ -39,7 +39,7 @@ type nssIdentityDTO struct {
 	IDHex        string `json:"idHex"`
 }
 
-func DiscoverNSSStores() []*NSSStore {
+func DiscoverNSSStores(ctx context.Context) []*NSSStore {
 	var stores []*NSSStore
 	seen := make(map[string]struct{})
 
@@ -49,11 +49,25 @@ func DiscoverNSSStores() []*NSSStore {
 	}
 
 	addStore := func(profileDir, label string) {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
 		if profileDir == "" {
 			return
 		}
 		profileDir = filepath.Clean(profileDir)
-		if _, err := os.Stat(filepath.Join(profileDir, "cert9.db")); err != nil {
+		// Accept both modern cert9.db and legacy cert8.db
+		hasCert9 := func() bool {
+			_, err := os.Stat(filepath.Join(profileDir, "cert9.db"))
+			return err == nil
+		}()
+		hasCert8 := func() bool {
+			_, err := os.Stat(filepath.Join(profileDir, "cert8.db"))
+			return err == nil
+		}()
+		if !hasCert9 && !hasCert8 {
 			return
 		}
 		if _, ok := seen[profileDir]; ok {
@@ -82,42 +96,55 @@ func DiscoverNSSStores() []*NSSStore {
 		addStore(profileDir, label)
 	}
 
-	// 3. Chromium/Brave NSS DBs (mostly Linux, with optional profile paths on other OSes).
-	var chromiumBases []string
-	switch runtime.GOOS {
-	case "windows":
-		localAppData := localAppDataDir()
-		chromiumBases = []string{
-			filepath.Join(localAppData, "Google", "Chrome", "User Data"),
-			filepath.Join(localAppData, "BraveSoftware", "Brave-Browser", "User Data"),
-			filepath.Join(localAppData, "Chromium", "User Data"),
-		}
-	case "darwin":
-		chromiumBases = []string{
-			filepath.Join(home, "Library", "Application Support", "Google", "Chrome"),
-			filepath.Join(home, "Library", "Application Support", "BraveSoftware", "Brave-Browser"),
-			filepath.Join(home, "Library", "Application Support", "Chromium"),
-		}
-	default:
-		chromiumBases = []string{
-			filepath.Join(home, ".config", "google-chrome"),
-			filepath.Join(home, ".config", "BraveSoftware", "Brave-Browser"),
-			filepath.Join(home, ".config", "chromium"),
-			filepath.Join(home, "snap", "brave", "common", ".pki", "nssdb"),
-		}
-		snapPaths, _ := filepath.Glob(filepath.Join(home, "snap", "*", "current", ".pki", "nssdb"))
-		chromiumBases = append(chromiumBases, snapPaths...)
-	}
-	for _, base := range chromiumBases {
+	// 3. Chromium-family NSS DBs — covers Chrome, Brave, Edge, Opera, Vivaldi, etc.
+	for _, base := range chromiumBaseDirs() {
 		addStore(base, "Browser NSS")
-
 		entries, _ := os.ReadDir(base)
 		for _, entry := range entries {
-			if entry.IsDir() && (entry.Name() == "Default" || strings.HasPrefix(entry.Name(), "Profile ")) {
-				profileDir := filepath.Join(base, entry.Name())
-				addStore(profileDir, "Browser Profile: "+entry.Name())
+			if !entry.IsDir() {
+				continue
+			}
+			n := entry.Name()
+			if n == "Default" || strings.HasPrefix(n, "Profile ") || strings.HasPrefix(n, "Guest Profile") {
+				addStore(filepath.Join(base, n), "Browser Profile: "+n)
 			}
 		}
+	}
+
+	// 4. System-wide NSS locations commonly used on Linux
+	if runtime.GOOS != "windows" {
+		for _, sysPath := range []string{"/etc/pki/nssdb", "/etc/nssdb"} {
+			if _, err := os.Stat(filepath.Join(sysPath, "cert9.db")); err == nil {
+				addStore(sysPath, "System NSS")
+			}
+		}
+	}
+
+	// 5. Aggressive walk: look for cert9.db/cert8.db under all likely roots.
+	walkRoots := uniqueExistingDirs(
+		filepath.Join(home, ".pki"),
+		filepath.Join(home, ".mozilla"),
+		filepath.Join(home, ".thunderbird"),
+		filepath.Join(home, ".librewolf"),
+		filepath.Join(home, ".waterfox"),
+		filepath.Join(home, ".var", "app"),  // flatpak user data
+		filepath.Join(home, "snap"),         // snap user data
+		filepath.Join(home, ".local", "share"),
+		localAppDataDir(),
+		appDataDir(),
+	)
+	if runtime.GOOS == "darwin" {
+		walkRoots = append(walkRoots, filepath.Join(home, "Library", "Application Support"))
+	}
+	if runtime.GOOS == "linux" {
+		walkRoots = append(walkRoots,
+			"/etc/pki",
+			"/etc/ssl",
+		)
+	}
+	candidates := walkNSSCandidates(ctx, walkRoots, 7, 500)
+	for _, dir := range candidates {
+		addStore(dir, "Browser NSS")
 	}
 
 	return stores
@@ -168,10 +195,33 @@ func findNSSLib() string {
 		}
 	default:
 		paths := []string{
+			// Debian/Ubuntu multiarch
 			"/usr/lib/x86_64-linux-gnu/libsoftokn3.so",
+			"/usr/lib/x86_64-linux-gnu/nss/libsoftokn3.so",
+			"/usr/lib/i386-linux-gnu/libsoftokn3.so",
+			"/usr/lib/aarch64-linux-gnu/libsoftokn3.so",
+			"/usr/lib/arm-linux-gnueabihf/libsoftokn3.so",
+			// Generic / Fedora / RHEL / Arch
 			"/usr/lib/libsoftokn3.so",
 			"/usr/lib64/libsoftokn3.so",
-			"/usr/lib/x86_64-linux-gnu/nss/libsoftokn3.so",
+			"/usr/lib64/nss/libsoftokn3.so",
+			// libnss3 fallback (some distros only ship this)
+			"/usr/lib/x86_64-linux-gnu/libnss3.so",
+			"/usr/lib/libnss3.so",
+			"/usr/lib64/libnss3.so",
+			// Firefox snap bundle
+			"/snap/firefox/current/usr/lib/firefox/libsoftokn3.so",
+			"/snap/firefox/current/usr/lib/firefox/libnss3.so",
+			// Firefox flatpak bundle
+			"/var/lib/flatpak/app/org.mozilla.firefox/current/active/files/lib/firefox/libsoftokn3.so",
+			"/var/lib/flatpak/app/org.mozilla.firefox/current/active/files/lib/firefox/libnss3.so",
+		}
+		// Also check user-local flatpak
+		if home, err := os.UserHomeDir(); err == nil {
+			paths = append(paths,
+				filepath.Join(home, ".local", "share", "flatpak", "app", "org.mozilla.firefox", "current", "active", "files", "lib", "firefox", "libsoftokn3.so"),
+				filepath.Join(home, ".local", "share", "flatpak", "app", "org.mozilla.firefox", "current", "active", "files", "lib", "firefox", "libnss3.so"),
+			)
 		}
 		for _, p := range paths {
 			if _, err := os.Stat(p); err == nil {
@@ -180,6 +230,79 @@ func findNSSLib() string {
 		}
 	}
 	return ""
+}
+
+func uniqueExistingDirs(dirs ...string) []string {
+	seen := make(map[string]struct{})
+	var out []string
+	for _, d := range dirs {
+		if d == "" {
+			continue
+		}
+		d = filepath.Clean(d)
+		if _, err := os.Stat(d); err != nil {
+			continue
+		}
+		if _, ok := seen[d]; ok {
+			continue
+		}
+		seen[d] = struct{}{}
+		out = append(out, d)
+	}
+	return out
+}
+
+func walkNSSCandidates(ctx context.Context, roots []string, maxDepth int, limit int) []string {
+	type void struct{}
+	seen := make(map[string]void)
+	var results []string
+	for _, root := range roots {
+		select {
+		case <-ctx.Done():
+			return results
+		default:
+		}
+		root = filepath.Clean(root)
+		rootDepth := len(strings.Split(root, string(os.PathSeparator)))
+		_ = filepath.WalkDir(root, func(path string, d os.DirEntry, err error) error {
+			if err != nil {
+				return nil
+			}
+			select {
+			case <-ctx.Done():
+				return context.Canceled
+			default:
+			}
+			depth := len(strings.Split(path, string(os.PathSeparator))) - rootDepth
+			if depth > maxDepth {
+				if d.IsDir() {
+					return filepath.SkipDir
+				}
+				return nil
+			}
+			if d.IsDir() {
+				return nil
+			}
+			name := d.Name()
+			if name != "cert9.db" && name != "cert8.db" {
+				return nil
+			}
+			dir := filepath.Dir(path)
+			if _, ok := seen[dir]; ok {
+				return nil
+			}
+			seen[dir] = void{}
+			results = append(results, dir)
+			if limit > 0 && len(results) >= limit {
+				return context.Canceled
+			}
+			return nil
+		})
+		if limit > 0 && len(results) >= limit {
+			break
+		}
+	}
+	return results
 }
 
 func (s *NSSStore) List(ctx context.Context) ([]pkcs12store.Identity, error) {

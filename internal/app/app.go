@@ -2,6 +2,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -44,6 +45,7 @@ type App struct {
 	// State
 	Identities       []pkcs12store.Identity
 	SystemIdentities []pkcs12store.Identity
+	LockedP12        []string
 
 	// Current Action State
 	CurrentReq   *model.SignRequest
@@ -97,6 +99,14 @@ func (a *App) IdentitiesSnapshot() []pkcs12store.Identity {
 	defer a.mu.RUnlock()
 	out := make([]pkcs12store.Identity, len(a.Identities))
 	copy(out, a.Identities)
+	return out
+}
+
+func (a *App) LockedP12Snapshot() []string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]string, len(a.LockedP12))
+	copy(out, a.LockedP12)
 	return out
 }
 
@@ -188,6 +198,8 @@ func (a *App) runUpdateCheck(force bool) {
 }
 
 func (a *App) ScanSystemStores(ctx context.Context) {
+	ctx, cancel := context.WithTimeout(ctx, 60*time.Second)
+	defer cancel()
 	start := time.Now()
 	log.Printf("DEBUG: ScanSystemStores started")
 	var all []pkcs12store.Identity
@@ -204,21 +216,55 @@ func (a *App) ScanSystemStores(ctx context.Context) {
 	}
 
 	// 2. NSS Stores
-	nssStores := systemstore.DiscoverNSSStores()
+	nssStores := systemstore.DiscoverNSSStores(ctx)
 	log.Printf("DEBUG: ScanSystemStores: discovered %d NSS stores", len(nssStores))
+	var nssMu sync.Mutex
+	sem := make(chan struct{}, 4)
+	var wg sync.WaitGroup
 	for _, s := range nssStores {
-		log.Printf("DEBUG: ScanSystemStores: scanning NSS store label=%q profile=%q", s.Label, s.ProfileDir)
-		ids, err := safeList(s.List, ctx, "NSS store "+s.Label)
-		if err == nil {
-			all = append(all, ids...)
-			log.Printf("DEBUG: ScanSystemStores: NSS store %q returned %d identities", s.Label, len(ids))
-		} else {
-			log.Printf("DEBUG: ScanSystemStores: NSS store %q error: %v", s.Label, err)
+		s := s
+		sem <- struct{}{}
+		wg.Add(1)
+		go func() {
+			defer func() {
+				<-sem
+				wg.Done()
+			}()
+			log.Printf("DEBUG: ScanSystemStores: scanning NSS store label=%q profile=%q", s.Label, s.ProfileDir)
+			ids, err := safeList(s.List, ctx, "NSS store "+s.Label)
+			if err == nil {
+				nssMu.Lock()
+				all = append(all, ids...)
+				nssMu.Unlock()
+				log.Printf("DEBUG: ScanSystemStores: NSS store %q returned %d identities", s.Label, len(ids))
+			} else {
+				log.Printf("DEBUG: ScanSystemStores: NSS store %q error: %v", s.Label, err)
+			}
+		}()
+	}
+	wg.Wait()
+
+	// 3. PKCS#12 files (passwordless only)
+	var lockedP12 []string
+	p12Paths := systemstore.FindPKCS12Candidates(ctx, 5, 200)
+	log.Printf("DEBUG: ScanSystemStores: discovered %d candidate PKCS#12 files", len(p12Paths))
+	for _, p := range p12Paths {
+		id, err := systemstore.ParsePKCS12Metadata(p, "")
+		if err != nil {
+			if errors.Is(err, systemstore.ErrPKCS12PasswordRequired) {
+				log.Printf("DEBUG: PKCS#12 file requires password, skipping auto-import: %s", p)
+				lockedP12 = append(lockedP12, p)
+			} else {
+				log.Printf("DEBUG: PKCS#12 parse skipped for %s: %v", p, err)
+			}
+			continue
 		}
+		all = append(all, id)
 	}
 
 	a.mu.Lock()
 	defer a.mu.Unlock()
+	a.LockedP12 = lockedP12
 
 	// Deduplicate based on Fingerprint
 	seen := make(map[string]bool)

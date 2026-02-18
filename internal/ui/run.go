@@ -168,18 +168,17 @@ func Run(w *gioapp.Window, a *app.App) error {
 						}
 						return widgets.VerticalDivider(gtx, color.NRGBA{R: 0xE5, G: 0xEB, B: 0xF5, A: 0xFF})
 					}),
-					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-						return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							if a.CurrentScreen == app.ScreenWizard {
-								return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
-									return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
-								})
-							}
-							return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
-							})
+				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+					if a.CurrentScreen == app.ScreenWizard {
+						gtx.Constraints.Min = gtx.Constraints.Max
+						return current(gtx)
+					}
+					return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
 						})
-					}),
+					})
+				}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if a.CurrentScreen == app.ScreenWizard {
 							return layout.Dimensions{}
