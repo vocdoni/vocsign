@@ -25,6 +25,22 @@ jobs:
         with:
           go-version-file: go.mod
 
+      - name: Install Linux GUI build dependencies
+        run: |
+          sudo apt-get update
+          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            pkg-config \
+            libx11-dev \
+            libxkbcommon-dev \
+            libxkbcommon-x11-dev \
+            libx11-xcb-dev \
+            libxcursor-dev \
+            libxfixes-dev \
+            libwayland-dev \
+            libegl1-mesa-dev \
+            libgles2-mesa-dev \
+            libvulkan-dev
+
       - name: Run tests
         run: make test
 

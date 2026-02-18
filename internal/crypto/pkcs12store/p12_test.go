@@ -4,19 +4,21 @@ import (
 	"bytes"
 	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
 	"testing"
 )
 
 func TestParsePKCS12IDCatNoPassword(t *testing.T) {
-	testParsePKCS12(t, "../../../certificat_idcat.p12", "")
+	testParsePKCS12(t, fixturePath("test/certs/idcat_like_nopass.p12"), "")
 }
 
 func TestParsePKCS12PasswordProtected(t *testing.T) {
-	testParsePKCS12(t, "../../../test/certs/user.p12", "password")
+	testParsePKCS12(t, fixturePath("test/certs/user.p12"), "password")
 }
 
 func TestParsePKCS12WrongPassword(t *testing.T) {
-	data, err := os.ReadFile("../../../test/certs/user.p12")
+	data, err := os.ReadFile(fixturePath("test/certs/user.p12"))
 	if err != nil {
 		t.Fatalf("failed to read test file: %v", err)
 	}
@@ -28,7 +30,7 @@ func TestParsePKCS12WrongPassword(t *testing.T) {
 }
 
 func TestParsePKCS12PasswordRequired(t *testing.T) {
-	data, err := os.ReadFile("../../../test/certs/user.p12")
+	data, err := os.ReadFile(fixturePath("test/certs/user.p12"))
 	if err != nil {
 		t.Fatalf("failed to read test file: %v", err)
 	}
@@ -68,4 +70,13 @@ func testParsePKCS12(t *testing.T, p12Path, password string) {
 	}
 	t.Logf("Subject: %s", cert.Subject)
 	t.Logf("CA Chain length: %d", len(chain))
+}
+
+func fixturePath(rel string) string {
+	_, thisFile, _, ok := runtime.Caller(0)
+	if !ok {
+		panic("unable to resolve test file path")
+	}
+	repoRoot := filepath.Clean(filepath.Join(filepath.Dir(thisFile), "..", "..", ".."))
+	return filepath.Join(repoRoot, filepath.FromSlash(rel))
 }
