@@ -2,7 +2,6 @@ package ui
 
 import (
 	"bytes"
-	"fmt"
 	"image"
 	"image/color"
 	_ "image/png"
@@ -24,7 +23,6 @@ import (
 )
 
 func Run(w *gioapp.Window, a *app.App) error {
-	fmt.Printf("DEBUG: VocSign Run loop started\n")
 	a.Explorer = explorer.NewExplorer(w)
 	a.Invalidate = w.Invalidate
 	th := NewTheme()
@@ -105,124 +103,98 @@ func Run(w *gioapp.Window, a *app.App) error {
 			}
 
 			// Main Background & App Border
-			layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
-					return widgets.Card(gtx, th.Palette.Bg, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{
-							Axis: layout.Vertical,
-						}.Layout(gtx,
-							// Navigation Bar (Hide in Wizard)
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+			layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+				return widgets.Section(gtx, th.Palette.Bg, func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if a.CurrentScreen == app.ScreenWizard {
+								return layout.Dimensions{}
+							}
+							return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return widgets.IconLabel(gtx, th, icons.IconVocSign, "VocSign", th.Palette.ContrastBg, unit.Sp(20))
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(24)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											active := a.CurrentScreen == app.ScreenOpenRequest || a.CurrentScreen == app.ScreenRequestDetails
+											return navTab(gtx, th, &tabOpen, icons.IconOpenRequest, "Open Request", active)
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return navTab(gtx, th, &tabCert, icons.IconCertificates, "Certificates", a.CurrentScreen == app.ScreenCertificates)
+										}),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											return navTab(gtx, th, &tabAudit, icons.IconAudit, "Audit", a.CurrentScreen == app.ScreenAudit)
+										}),
+									)
+								})
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if a.CurrentScreen == app.ScreenWizard {
+								return layout.Dimensions{}
+							}
+							return widgets.VerticalDivider(gtx, color.NRGBA{R: 0xE5, G: 0xEB, B: 0xF5, A: 0xFF})
+						}),
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 								if a.CurrentScreen == app.ScreenWizard {
-									return layout.Dimensions{}
+									return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
+										return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
+									})
 								}
-								return layout.Stack{}.Layout(gtx,
-									layout.Expanded(func(gtx layout.Context) layout.Dimensions {
-										widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions { return layout.Dimensions{} })
-										return layout.Dimensions{Size: gtx.Constraints.Min}
-									}),
-									layout.Stacked(func(gtx layout.Context) layout.Dimensions {
-										return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return widgets.IconLabel(gtx, th, icons.IconVocSign, "VocSign", th.Palette.ContrastBg, unit.Sp(20))
-												}),
-												layout.Rigid(layout.Spacer{Width: unit.Dp(32)}.Layout),
-
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													bg := color.NRGBA{A: 0}
-													fg := th.Palette.Fg
-													if a.CurrentScreen == app.ScreenOpenRequest || a.CurrentScreen == app.ScreenRequestDetails {
-														bg = th.Palette.ContrastBg
-														fg = th.Palette.ContrastFg
-													}
-													return material.Clickable(gtx, &tabOpen, func(gtx layout.Context) layout.Dimensions {
-														return widgets.Border(gtx, color.NRGBA{A: 0}, func(gtx layout.Context) layout.Dimensions {
-															return widgets.CustomCard(gtx, bg, unit.Dp(8), func(gtx layout.Context) layout.Dimensions {
-																gtx.Constraints.Min.X = gtx.Dp(140)
-																return widgets.IconLabel(gtx, th, icons.IconOpenRequest, "Open Request", fg, unit.Sp(14))
-															})
-														})
-													})
-												}),
-												layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													bg := color.NRGBA{A: 0}
-													fg := th.Palette.Fg
-													if a.CurrentScreen == app.ScreenCertificates {
-														bg = th.Palette.ContrastBg
-														fg = th.Palette.ContrastFg
-													}
-													return material.Clickable(gtx, &tabCert, func(gtx layout.Context) layout.Dimensions {
-														return widgets.CustomCard(gtx, bg, unit.Dp(8), func(gtx layout.Context) layout.Dimensions {
-															gtx.Constraints.Min.X = gtx.Dp(140)
-															return widgets.IconLabel(gtx, th, icons.IconCertificates, "My Certificates", fg, unit.Sp(14))
-														})
-													})
-												}),
-												layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													bg := color.NRGBA{A: 0}
-													fg := th.Palette.Fg
-													if a.CurrentScreen == app.ScreenAudit {
-														bg = th.Palette.ContrastBg
-														fg = th.Palette.ContrastFg
-													}
-													return material.Clickable(gtx, &tabAudit, func(gtx layout.Context) layout.Dimensions {
-														return widgets.CustomCard(gtx, bg, unit.Dp(8), func(gtx layout.Context) layout.Dimensions {
-															gtx.Constraints.Min.X = gtx.Dp(140)
-															return widgets.IconLabel(gtx, th, icons.IconAudit, "Audit Log", fg, unit.Sp(14))
-														})
-													})
-												}),
-											)
-										})
-									}),
-								)
-							}),
-							// Separator
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if a.CurrentScreen == app.ScreenWizard {
-									return layout.Dimensions{}
-								}
-								return widgets.VerticalDivider(gtx, color.NRGBA{R: 0xED, G: 0xF1, B: 0xF5, A: 0xFF})
-							}),
-							// Screen Content
-							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return layout.UniformInset(unit.Dp(12)).Layout(gtx, current)
-							}),
-							// Footer with Logo
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.UniformInset(unit.Dp(16)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle, Spacing: layout.SpaceEnd}.Layout(gtx,
+								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
+							})
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if a.CurrentScreen == app.ScreenWizard {
+								return layout.Dimensions{}
+							}
+							return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+										layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+											l := material.Caption(th, "Secure signatures with official certificates")
+											l.Color = color.NRGBA{R: 0x5F, G: 0x6E, B: 0x84, A: 0xFF}
+											return l.Layout(gtx)
+										}),
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											if err != nil {
 												return layout.Dimensions{}
 											}
 											return material.Clickable(gtx, &logoClick, func(gtx layout.Context) layout.Dimensions {
-												gtx.Constraints.Max.X = gtx.Dp(120) // Bigger logo
-												gtx.Constraints.Max.Y = gtx.Dp(40)
-												return widget.Image{
-													Src: logoOp,
-													Fit: widget.Contain,
-												}.Layout(gtx)
+												gtx.Constraints.Max.X = gtx.Dp(288)
+												gtx.Constraints.Max.Y = gtx.Dp(84)
+												return widget.Image{Src: logoOp, Fit: widget.Contain}.Layout(gtx)
 											})
-										}),
-										layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											l := material.Caption(th, "Powered by Vocdoni Open Stack")
-											l.Color = color.NRGBA{R: 0x66, G: 0x66, B: 0x66, A: 0xFF}
-											return l.Layout(gtx)
 										}),
 									)
 								})
-							}),
-						)
-					})
+							})
+						}),
+					)
 				})
 			})
 
 			e.Frame(gtx.Ops)
 		}
 	}
+}
+
+func navTab(gtx layout.Context, th *material.Theme, click *widget.Clickable, icon *widget.Icon, label string, active bool) layout.Dimensions {
+	bg := color.NRGBA{A: 0}
+	fg := th.Palette.Fg
+	if active {
+		bg = th.Palette.ContrastBg
+		fg = th.Palette.ContrastFg
+	}
+	return material.Clickable(gtx, click, func(gtx layout.Context) layout.Dimensions {
+		return widgets.CustomCard(gtx, bg, unit.Dp(8), func(gtx layout.Context) layout.Dimensions {
+			gtx.Constraints.Min.X = gtx.Dp(164)
+			return widgets.IconLabel(gtx, th, icon, label, fg, unit.Sp(16))
+		})
+	})
 }

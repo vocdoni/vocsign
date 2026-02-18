@@ -37,8 +37,7 @@ type RequestDetailsScreen struct {
 	CertList   widget.List
 	CertEnum   widget.Enum
 
-	IDEditor     widget.Editor
-	StatusEditor widget.Editor
+	IDEditor widget.Editor
 
 	NomEditor     widget.Editor
 	Cognom1Editor widget.Editor
@@ -73,7 +72,6 @@ func NewRequestDetailsScreen(a *app.App, th *material.Theme) *RequestDetailsScre
 	s.PostSignList.Axis = layout.Vertical
 
 	s.IDEditor.ReadOnly = true
-	s.StatusEditor.ReadOnly = true
 
 	s.BirthEditor.SetText("1980-01-01")
 	return s
@@ -82,7 +80,12 @@ func NewRequestDetailsScreen(a *app.App, th *material.Theme) *RequestDetailsScre
 func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 	req := s.App.CurrentReq
 	if req == nil {
-		return material.Body1(s.Theme, "No request loaded").Layout(gtx)
+		gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
+		return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+			return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
+				return widgets.EmptyState(gtx, s.Theme, "No request loaded", "Go to Open Request and fetch a proposal URL.")
+			})
+		})
 	}
 
 	if s.App.SignResponse != nil {
@@ -121,10 +124,6 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 		} else {
 			s.selectedInfo = certs.ExtractedInfo{}
 		}
-	}
-
-	if s.StatusEditor.Text() != s.App.SignStatus {
-		s.StatusEditor.SetText(s.App.SignStatus)
 	}
 
 	if s.SignButton.Clicked(gtx) && !s.IsSigning {
@@ -253,8 +252,8 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 	}
 
 	groups := groupedIdentities{}
-	allIdentities := append([]pkcs12store.Identity{}, s.App.Identities...)
-	allIdentities = append(allIdentities, s.App.SystemIdentities...)
+	allIdentities := append([]pkcs12store.Identity{}, s.App.IdentitiesSnapshot()...)
+	allIdentities = append(allIdentities, s.App.SystemIdentitiesSnapshot()...)
 	for _, id := range allIdentities {
 		info := certs.ExtractSpanishIdentity(id.Cert)
 		if info.IsRepresentative {
@@ -271,16 +270,13 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "SIGN REQUEST", s.Theme.Palette.ContrastBg, unit.Sp(22))
+							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Sign Request", s.Theme.Palette.ContrastBg, unit.Sp(22))
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if s.backButton.Clicked(gtx) {
 								s.App.CurrentScreen = app.ScreenOpenRequest
 							}
-							btn := material.Button(s.Theme, &s.backButton, "Back")
-							btn.Background = widgets.ColorBorder
-							btn.Color = s.Theme.Palette.Fg
-							btn.TextSize = unit.Sp(12)
+							btn := widgets.SecondaryButton(s.Theme, &s.backButton, "Back")
 							return btn.Layout(gtx)
 						}),
 					)
@@ -288,7 +284,7 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
 
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+					return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								l := material.H6(s.Theme, req.Proposal.Title)
@@ -330,7 +326,7 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 
 				layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "SIGNATURE WORKSPACE", s.Theme.Palette.Fg, unit.Sp(18))
+					return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "Signature Workspace", s.Theme.Palette.Fg, unit.Sp(18))
 				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 
@@ -351,7 +347,7 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 							}),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								leftPane := func(gtx layout.Context) layout.Dimensions {
-									return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+									return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
 										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 											layout.Rigid(material.Subtitle2(s.Theme, "1. Choose Certificate").Layout),
 											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
@@ -381,7 +377,7 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 									})
 								}
 								rightPane := func(gtx layout.Context) layout.Dimensions {
-									return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+									return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
 										if s.CertEnum.Value == "" {
 											return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 												return material.Body2(s.Theme, "Select a certificate to review signer data.").Layout(gtx)
@@ -453,30 +449,31 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 
 							layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
-									return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-											layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-												if s.App.SignStatus == "" {
-													l := material.Body2(s.Theme, "Please verify all details. Your signature will be legally binding.")
-													l.Color = s.Theme.Palette.Fg
-													return l.Layout(gtx)
-												}
-												return material.Editor(s.Theme, &s.StatusEditor, "").Layout(gtx)
-											}),
-											layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												btn := material.Button(s.Theme, &s.SignButton, "CONFIRM & SIGN")
-												if s.IsSigning || s.CertEnum.Value == "" {
-													btn.Background = widgets.ColorBorder
-												} else {
-													btn.Background = s.Theme.Palette.ContrastBg
-												}
-												btn.TextSize = unit.Sp(18)
-												return btn.Layout(gtx)
-											}),
-										)
-									})
+								return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											msg := s.App.SignStatus
+											if msg == "" {
+												msg = "Please verify all details. Your signature will be legally binding."
+											}
+											tone := widgets.BannerInfo
+											if strings.Contains(strings.ToLower(msg), "failed") || strings.Contains(strings.ToLower(msg), "error") {
+												tone = widgets.BannerError
+											} else if strings.Contains(strings.ToLower(msg), "submitting") || strings.Contains(strings.ToLower(msg), "preparing") {
+												tone = widgets.BannerWarning
+											}
+											return widgets.Banner(gtx, s.Theme, tone, msg)
+										}),
+										layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											btn := widgets.PrimaryButton(s.Theme, &s.SignButton, "Confirm and Sign")
+											if s.IsSigning || s.CertEnum.Value == "" {
+												btn = widgets.SecondaryButton(s.Theme, &s.SignButton, "Confirm and Sign")
+											}
+											btn.TextSize = unit.Sp(16)
+											return btn.Layout(gtx)
+										}),
+									)
 								})
 							}),
 						)
@@ -529,15 +526,15 @@ func (s *RequestDetailsScreen) layoutPostSign(gtx layout.Context) layout.Dimensi
 		gtx.Constraints.Min.X = gtx.Constraints.Max.X
 		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return widgets.IconLabel(gtx, s.Theme, icons.IconCheck, "SIGNATURE SUCCESSFULLY PROCESSED", widgets.ColorSuccess, unit.Sp(28))
+				return widgets.IconLabel(gtx, s.Theme, icons.IconCheck, "Signature Successfully Processed", widgets.ColorSuccess, unit.Sp(28))
 			}),
 			layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-				return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
+				return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
 					return widgets.CustomCard(gtx, widgets.ColorSurface, unit.Dp(24), func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "OFFICIAL RECEIPT", s.Theme.Palette.ContrastBg, unit.Sp(14))
+								return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "Official Receipt", s.Theme.Palette.ContrastBg, unit.Sp(14))
 							}),
 							layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -580,21 +577,24 @@ func (s *RequestDetailsScreen) layoutPostSign(gtx layout.Context) layout.Dimensi
 					s.App.SignStatus = ""
 					s.App.CurrentScreen = app.ScreenOpenRequest
 				}
-				return material.Button(s.Theme, &s.backButton, "DONE - BACK TO HOME").Layout(gtx)
+				btn := widgets.SecondaryButton(s.Theme, &s.backButton, "Done - Back to Home")
+				return btn.Layout(gtx)
 			}),
 		)
 	})
 }
 
 func (s *RequestDetailsScreen) findIdentity(id string) *pkcs12store.Identity {
-	for i := range s.App.Identities {
-		if s.App.Identities[i].ID == id {
-			return &s.App.Identities[i]
+	for _, identity := range s.App.IdentitiesSnapshot() {
+		if identity.ID == id {
+			idCopy := identity
+			return &idCopy
 		}
 	}
-	for i := range s.App.SystemIdentities {
-		if s.App.SystemIdentities[i].ID == id {
-			return &s.App.SystemIdentities[i]
+	for _, identity := range s.App.SystemIdentitiesSnapshot() {
+		if identity.ID == id {
+			idCopy := identity
+			return &idCopy
 		}
 	}
 	return nil

@@ -26,12 +26,9 @@ type OpenRequestScreen struct {
 	App   *app.App
 	Theme *material.Theme
 
-	List widget.List
-
-	URLEditor    widget.Editor
-	StatusEditor widget.Editor
-	FetchButton  widget.Clickable
-	PasteButton  widget.Clickable
+	URLEditor   widget.Editor
+	FetchButton widget.Clickable
+	PasteButton widget.Clickable
 }
 
 func NewOpenRequestScreen(a *app.App, th *material.Theme) *OpenRequestScreen {
@@ -39,9 +36,7 @@ func NewOpenRequestScreen(a *app.App, th *material.Theme) *OpenRequestScreen {
 		App:   a,
 		Theme: th,
 	}
-	s.List.Axis = layout.Vertical
 	s.URLEditor.SingleLine = true
-	s.StatusEditor.ReadOnly = true
 	return s
 }
 
@@ -120,48 +115,62 @@ func (s *OpenRequestScreen) Layout(gtx layout.Context) layout.Dimensions {
 		}
 	}
 
-	if s.StatusEditor.Text() != s.App.FetchStatus {
-		s.StatusEditor.SetText(s.App.FetchStatus)
-	}
-
-	return material.List(s.Theme, &s.List).Layout(gtx, 1, func(gtx layout.Context, index int) layout.Dimensions {
-		return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Constraints.Max.X
-					return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Paste the Signing URL provided by the organizer:", s.Theme.Palette.Fg, unit.Sp(16))
-							}),
-							layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-									layout.Flexed(1, material.Editor(s.Theme, &s.URLEditor, "https://...").Layout),
-									layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-										btn := material.Button(s.Theme, &s.PasteButton, "Paste")
-										btn.Background = widgets.ColorBorder
-										btn.Color = s.Theme.Palette.Fg
-										return btn.Layout(gtx)
-									}),
-								)
-							}),
-							layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
-							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return material.Button(s.Theme, &s.FetchButton, "FETCH PROPOSAL").Layout(gtx)
-							}),
-						)
-					})
-				}),
-				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
-				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if s.App.FetchStatus == "" {
-						return layout.Dimensions{}
-					}
-					return material.Body2(s.Theme, s.App.FetchStatus).Layout(gtx)
-				}),
-			)
+	return layout.UniformInset(unit.Dp(6)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
+			return widgets.ConstrainMaxWidth(gtx, unit.Dp(860), func(gtx layout.Context) layout.Dimensions {
+				gtx.Constraints.Min.X = gtx.Constraints.Max.X
+				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Open Signing Request", s.Theme.Palette.ContrastBg, unit.Sp(24))
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+								layout.Rigid(material.Body1(s.Theme, "Paste the URL provided by the organizer.").Layout),
+								layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+										layout.Flexed(1, material.Editor(s.Theme, &s.URLEditor, "https://...").Layout),
+										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+											btn := widgets.SecondaryButton(s.Theme, &s.PasteButton, "Paste")
+											return btn.Layout(gtx)
+										}),
+									)
+								}),
+								layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
+								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+									btn := widgets.PrimaryButton(s.Theme, &s.FetchButton, "Fetch Proposal")
+									return btn.Layout(gtx)
+								}),
+							)
+						})
+					}),
+					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+						if s.App.FetchStatus == "" {
+							return layout.Dimensions{}
+						}
+						return layout.Inset{Top: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							tone := statusTone(s.App.FetchStatus)
+							return widgets.Banner(gtx, s.Theme, tone, s.App.FetchStatus)
+						})
+					}),
+				)
+			})
 		})
 	})
+}
+
+func statusTone(status string) widgets.BannerTone {
+	lower := strings.ToLower(status)
+	switch {
+	case strings.Contains(lower, "failed"), strings.Contains(lower, "error"):
+		return widgets.BannerError
+	case strings.Contains(lower, "ready"), strings.Contains(lower, "pasted"):
+		return widgets.BannerSuccess
+	default:
+		return widgets.BannerInfo
+	}
 }

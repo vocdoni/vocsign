@@ -53,11 +53,13 @@ func NewCertificatesScreen(a *app.App, th *material.Theme) *CertificatesScreen {
 }
 
 func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
+	identities := s.App.IdentitiesSnapshot()
+
 	if s.WizardButton.Clicked(gtx) {
 		s.App.CurrentScreen = app.ScreenWizard
 	}
 
-	for _, id := range s.App.Identities {
+	for _, id := range identities {
 		if btn, ok := s.DeleteButtons[id.ID]; ok && btn.Clicked(gtx) {
 			s.pendingDeleteID = id.ID
 		}
@@ -69,7 +71,7 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 			ctx := context.Background()
 			s.App.Store.Delete(ctx, targetID)
 			ids, _ := s.App.Store.List(ctx)
-			s.App.Identities = ids
+			s.App.SetIdentities(ids)
 			if s.selectedID == targetID {
 				s.selectedID = ""
 			}
@@ -82,7 +84,7 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 
 	var pendingName string
 	if s.pendingDeleteID != "" {
-		for _, id := range s.App.Identities {
+		for _, id := range identities {
 			if id.ID == s.pendingDeleteID {
 				pendingName = id.FriendlyName
 				break
@@ -92,7 +94,7 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 
 	// Group identities
 	groups := groupedIdentities{}
-	for _, id := range s.App.Identities {
+	for _, id := range identities {
 		info := certs.ExtractSpanishIdentity(id.Cert)
 		if info.IsRepresentative {
 			groups.Representation = append(groups.Representation, id)
@@ -105,10 +107,11 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return widgets.IconLabel(gtx, s.Theme, icons.IconCertificates, "Identity Wallet", s.Theme.Palette.Fg, unit.Sp(24))
+					return widgets.IconLabel(gtx, s.Theme, icons.IconCertificates, "Identity Wallet", s.Theme.Palette.ContrastBg, unit.Sp(24))
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return material.Button(s.Theme, &s.WizardButton, "IMPORT NEW...").Layout(gtx)
+					btn := widgets.PrimaryButton(s.Theme, &s.WizardButton, "Import Certificate")
+					return btn.Layout(gtx)
 				}),
 			)
 		}),
@@ -144,50 +147,58 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
 				// Left Col: List
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					var widgetsToRender []layout.Widget
-					if len(groups.Personal) > 0 {
-						widgetsToRender = append(widgetsToRender, func(gtx layout.Context) layout.Dimensions {
-							return material.Caption(s.Theme, "PERSONAL CERTIFICATES").Layout(gtx)
-						})
-						for _, id := range groups.Personal {
-							widgetsToRender = append(widgetsToRender, s.certificateRow(id))
-						}
-					}
-					if len(groups.Representation) > 0 {
+					gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
+					return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+						var widgetsToRender []layout.Widget
 						if len(groups.Personal) > 0 {
 							widgetsToRender = append(widgetsToRender, func(gtx layout.Context) layout.Dimensions {
-								return layout.Spacer{Height: unit.Dp(16)}.Layout(gtx)
+								return material.Caption(s.Theme, "PERSONAL CERTIFICATES").Layout(gtx)
+							})
+							for _, id := range groups.Personal {
+								widgetsToRender = append(widgetsToRender, s.certificateRow(id))
+							}
+						}
+						if len(groups.Representation) > 0 {
+							if len(groups.Personal) > 0 {
+								widgetsToRender = append(widgetsToRender, func(gtx layout.Context) layout.Dimensions {
+									return layout.Spacer{Height: unit.Dp(16)}.Layout(gtx)
+								})
+							}
+							widgetsToRender = append(widgetsToRender, func(gtx layout.Context) layout.Dimensions {
+								l := material.Caption(s.Theme, "REPRESENTATION CERTIFICATES")
+								l.Color = widgets.ColorWarning
+								return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, l.Layout)
+							})
+							for _, id := range groups.Representation {
+								widgetsToRender = append(widgetsToRender, s.certificateRow(id))
+							}
+						}
+
+						if len(widgetsToRender) == 0 {
+							return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
+								return widgets.EmptyState(gtx, s.Theme, "Wallet is empty", "Import a certificate to start signing.")
 							})
 						}
-						widgetsToRender = append(widgetsToRender, func(gtx layout.Context) layout.Dimensions {
-							l := material.Caption(s.Theme, "REPRESENTATION CERTIFICATES")
-							l.Color = widgets.ColorWarning
-							return layout.Inset{Bottom: unit.Dp(8)}.Layout(gtx, l.Layout)
+
+						return material.List(s.Theme, &s.List).Layout(gtx, len(widgetsToRender), func(gtx layout.Context, index int) layout.Dimensions {
+							return widgetsToRender[index](gtx)
 						})
-						for _, id := range groups.Representation {
-							widgetsToRender = append(widgetsToRender, s.certificateRow(id))
-						}
-					}
-
-					if len(widgetsToRender) == 0 {
-						return material.Body2(s.Theme, "Wallet is empty.").Layout(gtx)
-					}
-
-					return material.List(s.Theme, &s.List).Layout(gtx, len(widgetsToRender), func(gtx layout.Context, index int) layout.Dimensions {
-						return widgetsToRender[index](gtx)
 					})
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(24)}.Layout),
 				// Right Col: Details (Scrollable)
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
 					if s.selectedID == "" {
-						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return material.Body2(s.Theme, "Select a certificate to view its properties.").Layout(gtx)
+						gtx.Constraints.Min.Y = gtx.Constraints.Max.Y
+						return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+							return widgets.CenterInAvailable(gtx, func(gtx layout.Context) layout.Dimensions {
+								return widgets.EmptyState(gtx, s.Theme, "No certificate selected", "Choose one from the left panel to view details.")
+							})
 						})
 					}
 
 					return material.List(s.Theme, &s.DetailsList).Layout(gtx, 1, func(gtx layout.Context, index int) layout.Dimensions {
-						return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+						return widgets.Section(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
 							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 								// Header
 								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -291,13 +302,7 @@ func (s *CertificatesScreen) certificateRow(id pkcs12store.Identity) layout.Widg
 												if !isExpired(id.Cert.NotAfter) {
 													return layout.Dimensions{}
 												}
-												return widgets.Border(gtx, widgets.ColorWarning, func(gtx layout.Context) layout.Dimensions {
-													return layout.UniformInset(unit.Dp(3)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-														l := material.Caption(s.Theme, "Expired")
-														l.Color = widgets.ColorWarning
-														return l.Layout(gtx)
-													})
-												})
+												return widgets.Tag(gtx, s.Theme, "Expired", widgets.ColorWarning)
 											}),
 										)
 									}),
@@ -323,9 +328,8 @@ func (s *CertificatesScreen) certificateRow(id pkcs12store.Identity) layout.Widg
 								if _, ok := s.DeleteButtons[id.ID]; !ok {
 									s.DeleteButtons[id.ID] = &widget.Clickable{}
 								}
-								btn := material.Button(s.Theme, s.DeleteButtons[id.ID], "X")
-								btn.Background = widgets.ColorError
-								btn.TextSize = unit.Sp(10)
+								btn := widgets.DangerButton(s.Theme, s.DeleteButtons[id.ID], "X")
+								btn.TextSize = unit.Sp(11)
 								return layout.Inset{Top: unit.Dp(2), Bottom: unit.Dp(2), Left: unit.Dp(2), Right: unit.Dp(2)}.Layout(gtx, btn.Layout)
 							}),
 						)
@@ -351,9 +355,10 @@ func certStatusLabel(id *pkcs12store.Identity) string {
 }
 
 func (s *CertificatesScreen) findIdentity(id string) *pkcs12store.Identity {
-	for i := range s.App.Identities {
-		if s.App.Identities[i].ID == id {
-			return &s.App.Identities[i]
+	for _, identity := range s.App.IdentitiesSnapshot() {
+		if identity.ID == id {
+			idCopy := identity
+			return &idCopy
 		}
 	}
 	return nil

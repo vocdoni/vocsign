@@ -3,14 +3,19 @@
 package systemstore
 
 import (
+	"bytes"
 	"context"
-	"crypto"
 	"crypto/x509"
+	"encoding/hex"
+	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"runtime"
+	"runtime/debug"
 	"strings"
 	"time"
 	"unsafe"
@@ -23,6 +28,15 @@ type NSSStore struct {
 	LibPath    string
 	ProfileDir string
 	Label      string
+}
+
+type nssIdentityDTO struct {
+	FriendlyName string `json:"friendlyName"`
+	CertPEM      string `json:"certPem"`
+	LibPath      string `json:"libPath"`
+	ProfileDir   string `json:"profileDir"`
+	Slot         uint   `json:"slot"`
+	IDHex        string `json:"idHex"`
 }
 
 func DiscoverNSSStores() []*NSSStore {
@@ -93,8 +107,6 @@ func DiscoverNSSStores() []*NSSStore {
 		}
 		snapPaths, _ := filepath.Glob(filepath.Join(home, "snap", "*", "current", ".pki", "nssdb"))
 		chromiumBases = append(chromiumBases, snapPaths...)
-		braveSnaps, _ := filepath.Glob(filepath.Join(home, "snap", "brave", "*", ".pki", "nssdb"))
-		chromiumBases = append(chromiumBases, braveSnaps...)
 	}
 	for _, base := range chromiumBases {
 		addStore(base, "Browser NSS")
@@ -171,14 +183,70 @@ func findNSSLib() string {
 }
 
 func (s *NSSStore) List(ctx context.Context) ([]pkcs12store.Identity, error) {
+	return s.listViaWorker(ctx)
+}
+
+func (s *NSSStore) listViaWorker(ctx context.Context) ([]pkcs12store.Identity, error) {
+	exe, err := os.Executable()
+	if err != nil {
+		return nil, fmt.Errorf("resolve executable: %w", err)
+	}
+	cmd := exec.CommandContext(ctx, exe,
+		"--nss-scan-worker",
+		"--lib", s.LibPath,
+		"--profile", s.ProfileDir,
+		"--label", s.Label,
+	)
+	var stderr bytes.Buffer
+	cmd.Stderr = &stderr
+	stdout, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("nss worker failed for %s (%s): %w stderr=%s", s.Label, s.ProfileDir, err, strings.TrimSpace(stderr.String()))
+	}
+	var payload []nssIdentityDTO
+	if err := json.Unmarshal(stdout, &payload); err != nil {
+		return nil, fmt.Errorf("decode nss worker output for %s (%s): %w raw=%q stderr=%s", s.Label, s.ProfileDir, err, string(stdout), strings.TrimSpace(stderr.String()))
+	}
+	out := make([]pkcs12store.Identity, 0, len(payload))
+	for _, dto := range payload {
+		block, _ := pem.Decode([]byte(dto.CertPEM))
+		if block == nil || len(block.Bytes) == 0 {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			continue
+		}
+		keyID, err := hex.DecodeString(dto.IDHex)
+		if err != nil {
+			continue
+		}
+		out = append(out, pkcs12store.Identity{
+			ID:             fmt.Sprintf("nss:%s:%x", s.Label, pkcs12store.Fingerprint(cert)),
+			FriendlyName:   dto.FriendlyName,
+			Cert:           cert,
+			Fingerprint256: pkcs12store.Fingerprint(cert),
+			Signer: &pkcs12store.PKCS11Signer{
+				LibPath:    dto.LibPath,
+				ProfileDir: dto.ProfileDir,
+				Slot:       dto.Slot,
+				ID:         keyID,
+				PublicKey:  cert.PublicKey,
+			},
+		})
+	}
+	return out, nil
+}
+
+func (s *NSSStore) listDirect(ctx context.Context) ([]pkcs12store.Identity, error) {
 	log.Printf("DEBUG: Scanning NSS Store: %s (Profile: %s)", s.Label, s.ProfileDir)
 	p := pkcs11.New(s.LibPath)
 	if p == nil {
 		return nil, fmt.Errorf("failed to load PKCS#11 lib: %s", s.LibPath)
 	}
+	defer p.Destroy()
 
 	os.Setenv("NSS_CONFIG_DIR", "sql:"+s.ProfileDir)
-	_ = p.Finalize()
 
 	params := fmt.Sprintf("configdir='sql:%s' certPrefix='' keyPrefix='' secmod='secmod.db' flags=readOnly", s.ProfileDir)
 	pByte := append([]byte(params), 0)
@@ -187,7 +255,9 @@ func (s *NSSStore) List(ctx context.Context) ([]pkcs12store.Identity, error) {
 	err := p.Initialize(pkcs11.InitializeWithReserved(pPtr))
 	if err != nil {
 		log.Printf("DEBUG: NSS Initialize with reserved failed, trying plain: %v", err)
-		_ = p.Initialize()
+		if err2 := p.Initialize(); err2 != nil {
+			return nil, fmt.Errorf("pkcs11 initialize failed: reserved=%v plain=%w", err, err2)
+		}
 	}
 	defer p.Finalize()
 
@@ -200,111 +270,151 @@ func (s *NSSStore) List(ctx context.Context) ([]pkcs12store.Identity, error) {
 
 	var identities []pkcs12store.Identity
 	for _, slot := range slots {
+		if ctx.Err() != nil {
+			return identities, ctx.Err()
+		}
 		session, err := p.OpenSession(slot, pkcs11.CKF_SERIAL_SESSION)
 		if err != nil {
 			log.Printf("DEBUG: OpenSession failed for slot %d: %v", slot, err)
 			continue
 		}
 
-		_ = p.Login(session, pkcs11.CKU_USER, "")
+		func(slot uint) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("ERROR: panic while scanning NSS slot %d in %s: %v\n%s", slot, s.Label, r, string(debug.Stack()))
+				}
+				if err := p.Logout(session); err != nil && err != pkcs11.Error(pkcs11.CKR_USER_NOT_LOGGED_IN) {
+					log.Printf("DEBUG: Logout failed for slot %d in %s: %v", slot, s.Label, err)
+				}
+				if err := p.CloseSession(session); err != nil {
+					log.Printf("DEBUG: CloseSession failed for slot %d in %s: %v", slot, s.Label, err)
+				}
+			}()
 
-		p.FindObjectsInit(session, []*pkcs11.Attribute{})
-		objHandles, _, err := p.FindObjects(session, 1000)
-		p.FindObjectsFinal(session)
-
-		if err != nil {
-			log.Printf("DEBUG: FindObjects failed for slot %d: %v", slot, err)
-			p.CloseSession(session)
-			continue
-		}
-		log.Printf("DEBUG: Slot %d in %s has %d objects", slot, s.Label, len(objHandles))
-
-		for _, obj := range objHandles {
-			classAttr, err := p.GetAttributeValue(session, obj, []*pkcs11.Attribute{
-				pkcs11.NewAttribute(pkcs11.CKA_CLASS, nil),
-			})
-			if err != nil || len(classAttr[0].Value) == 0 {
-				continue
+			if err := p.Login(session, pkcs11.CKU_USER, ""); err != nil &&
+				err != pkcs11.Error(pkcs11.CKR_USER_ALREADY_LOGGED_IN) {
+				log.Printf("DEBUG: Login failed for slot %d in %s: %v", slot, s.Label, err)
 			}
 
-			// Use first byte for class check (standard values are small)
-			class := uint32(classAttr[0].Value[0])
-			if class != uint32(pkcs11.CKO_CERTIFICATE) {
-				continue
+			searchTemplate := []*pkcs11.Attribute{
+				pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_CERTIFICATE),
 			}
-
-			attrs, err := p.GetAttributeValue(session, obj, []*pkcs11.Attribute{
-				pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil),
-				pkcs11.NewAttribute(pkcs11.CKA_LABEL, nil),
-				pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
-			})
+			if err := p.FindObjectsInit(session, searchTemplate); err != nil {
+				log.Printf("DEBUG: FindObjectsInit failed for slot %d in %s: %v", slot, s.Label, err)
+				return
+			}
+			objHandles, _, err := p.FindObjects(session, 1000)
 			if err != nil {
-				continue
+				log.Printf("DEBUG: FindObjects failed for slot %d in %s: %v", slot, s.Label, err)
+				_ = p.FindObjectsFinal(session)
+				return
 			}
-
-			certDER := attrs[0].Value
-			label := string(attrs[1].Value)
-			ckaID := attrs[2].Value
-
-			if len(certDER) == 0 {
-				continue
+			if err := p.FindObjectsFinal(session); err != nil {
+				log.Printf("DEBUG: FindObjectsFinal failed for slot %d in %s: %v", slot, s.Label, err)
 			}
+			log.Printf("DEBUG: Slot %d in %s has %d certificate objects", slot, s.Label, len(objHandles))
 
-			cert, err := x509.ParseCertificate(certDER)
-			if err != nil {
-				continue
-			}
+			for _, obj := range objHandles {
+				attrs, err := p.GetAttributeValue(session, obj, []*pkcs11.Attribute{
+					pkcs11.NewAttribute(pkcs11.CKA_VALUE, nil),
+					pkcs11.NewAttribute(pkcs11.CKA_LABEL, nil),
+					pkcs11.NewAttribute(pkcs11.CKA_ID, nil),
+				})
+				if err != nil {
+					log.Printf("DEBUG: GetAttributeValue failed for obj %v in slot %d (%s): %v", obj, slot, s.Label, err)
+					continue
+				}
+				if len(attrs) < 3 {
+					log.Printf("DEBUG: GetAttributeValue returned %d attrs for obj %v in slot %d (%s), expected 3", len(attrs), obj, slot, s.Label)
+					continue
+				}
 
-			if time.Now().After(cert.NotAfter) || time.Now().Before(cert.NotBefore) {
-				continue
-			}
+				certDER := attrs[0].Value
+				label := string(attrs[1].Value)
+				ckaID := attrs[2].Value
+				if len(certDER) == 0 {
+					continue
+				}
 
-			if cert.KeyUsage != 0 && (cert.KeyUsage&x509.KeyUsageDigitalSignature == 0) && (cert.KeyUsage&x509.KeyUsageContentCommitment == 0) {
-				continue
-			}
+				cert, err := x509.ParseCertificate(certDER)
+				if err != nil {
+					continue
+				}
+				if time.Now().After(cert.NotAfter) || time.Now().Before(cert.NotBefore) {
+					continue
+				}
+				if cert.KeyUsage != 0 && (cert.KeyUsage&x509.KeyUsageDigitalSignature == 0) && (cert.KeyUsage&x509.KeyUsageContentCommitment == 0) {
+					continue
+				}
 
-			log.Printf("DEBUG: Found candidate certificate in %s: %s (Subject: %s)", s.Label, label, cert.Subject.CommonName)
+				log.Printf("DEBUG: Found candidate certificate in %s: %s (Subject: %s)", s.Label, label, cert.Subject.CommonName)
 
-			p.FindObjectsInit(session, []*pkcs11.Attribute{
-				pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
-				pkcs11.NewAttribute(pkcs11.CKA_ID, ckaID),
-			})
-			privObjs, _, _ := p.FindObjects(session, 1)
-			p.FindObjectsFinal(session)
+				privTemplate := []*pkcs11.Attribute{
+					pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
+					pkcs11.NewAttribute(pkcs11.CKA_ID, ckaID),
+				}
+				if err := p.FindObjectsInit(session, privTemplate); err != nil {
+					log.Printf("DEBUG: FindObjectsInit(private key) failed for slot %d in %s: %v", slot, s.Label, err)
+					continue
+				}
+				privObjs, _, err := p.FindObjects(session, 1)
+				if err != nil {
+					log.Printf("DEBUG: FindObjects(private key) failed for slot %d in %s: %v", slot, s.Label, err)
+					_ = p.FindObjectsFinal(session)
+					continue
+				}
+				if err := p.FindObjectsFinal(session); err != nil {
+					log.Printf("DEBUG: FindObjectsFinal(private key) failed for slot %d in %s: %v", slot, s.Label, err)
+				}
+				if len(privObjs) == 0 {
+					continue
+				}
 
-			var signer crypto.Signer
-			if len(privObjs) > 0 {
 				log.Printf("DEBUG:   Found matching private key for %s in %s", label, s.Label)
-				signer = &pkcs12store.PKCS11Signer{
+				signer := &pkcs12store.PKCS11Signer{
 					LibPath:    s.LibPath,
 					ProfileDir: s.ProfileDir,
 					Slot:       slot,
 					ID:         ckaID,
 					PublicKey:  cert.PublicKey,
 				}
-			}
 
-			if signer == nil {
-				continue
+				displayName := label
+				if cert.Subject.CommonName != "" {
+					displayName = cert.Subject.CommonName
+				}
+				identities = append(identities, pkcs12store.Identity{
+					ID:             fmt.Sprintf("nss:%s:%x", s.Label, pkcs12store.Fingerprint(cert)),
+					FriendlyName:   fmt.Sprintf("[%s] %s", s.Label, displayName),
+					Cert:           cert,
+					Fingerprint256: pkcs12store.Fingerprint(cert),
+					Signer:         signer,
+				})
 			}
-
-			displayName := label
-			if cert.Subject.CommonName != "" {
-				displayName = cert.Subject.CommonName
-			}
-
-			identities = append(identities, pkcs12store.Identity{
-				ID:             fmt.Sprintf("nss:%s:%x", s.Label, pkcs12store.Fingerprint(cert)),
-				FriendlyName:   fmt.Sprintf("[%s] %s", s.Label, displayName),
-				Cert:           cert,
-				Fingerprint256: pkcs12store.Fingerprint(cert),
-				Signer:         signer,
-			})
-		}
-		p.CloseSession(session)
+		}(slot)
 	}
 
 	return identities, nil
+}
+
+func identitiesToDTO(ids []pkcs12store.Identity) ([]nssIdentityDTO, error) {
+	out := make([]nssIdentityDTO, 0, len(ids))
+	for _, id := range ids {
+		signer, ok := id.Signer.(*pkcs12store.PKCS11Signer)
+		if !ok || id.Cert == nil {
+			continue
+		}
+		out = append(out, nssIdentityDTO{
+			FriendlyName: id.FriendlyName,
+			CertPEM:      string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: id.Cert.Raw})),
+			LibPath:      signer.LibPath,
+			ProfileDir:   signer.ProfileDir,
+			Slot:         signer.Slot,
+			IDHex:        hex.EncodeToString(signer.ID),
+		})
+	}
+	return out, nil
 }
 
 // PKCS11Signer and related types moved to pkcs12store package to avoid circular dependency.

@@ -3,15 +3,18 @@ package app
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"sync"
+	"time"
 
+	"gioui.org/x/explorer"
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/pkcs12store"
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/systemstore"
 	"github.com/vocdoni/gofirma/vocsign/internal/model"
 	"github.com/vocdoni/gofirma/vocsign/internal/storage"
-	"gioui.org/x/explorer"
 )
 
 type Screen int
@@ -25,10 +28,10 @@ const (
 )
 
 type App struct {
-	mu           sync.Mutex
+	mu            sync.RWMutex
 	CurrentScreen Screen
 	ShowWizard    bool
-	
+
 	// Services
 	Store       pkcs12store.Store
 	AuditLogger *storage.AuditLogger
@@ -37,58 +40,105 @@ type App struct {
 	// State
 	Identities       []pkcs12store.Identity
 	SystemIdentities []pkcs12store.Identity
-	
+
 	// Current Action State
-	CurrentReq  *model.SignRequest
-	RawReq      []byte
-	ReqError    error
-	FetchStatus string
-	SignStatus  string
+	CurrentReq   *model.SignRequest
+	RawReq       []byte
+	ReqError     error
+	FetchStatus  string
+	SignStatus   string
 	SignResponse *model.SignResponse
-	
+
 	// UI Actions
 	RequestURL string
 	Invalidate func()
 }
 
+func (a *App) SystemIdentitiesSnapshot() []pkcs12store.Identity {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]pkcs12store.Identity, len(a.SystemIdentities))
+	copy(out, a.SystemIdentities)
+	return out
+}
+
+func (a *App) IdentitiesSnapshot() []pkcs12store.Identity {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+	out := make([]pkcs12store.Identity, len(a.Identities))
+	copy(out, a.Identities)
+	return out
+}
+
+func (a *App) SetIdentities(ids []pkcs12store.Identity) {
+	a.mu.Lock()
+	defer a.mu.Unlock()
+	out := make([]pkcs12store.Identity, len(ids))
+	copy(out, ids)
+	a.Identities = out
+}
+
 func (a *App) ScanSystemStores(ctx context.Context) {
+	start := time.Now()
+	log.Printf("DEBUG: ScanSystemStores started")
 	var all []pkcs12store.Identity
 
 	// 1. OS-Native Store
 	osStore := &systemstore.OSStore{Label: "System"}
-	ids, err := osStore.List(ctx)
+	log.Printf("DEBUG: ScanSystemStores: scanning OS store %q", osStore.Label)
+	ids, err := safeList(osStore.List, ctx, "OS store")
 	if err == nil {
 		all = append(all, ids...)
+		log.Printf("DEBUG: ScanSystemStores: OS store returned %d identities", len(ids))
+	} else {
+		log.Printf("DEBUG: ScanSystemStores: OS store error: %v", err)
 	}
 
 	// 2. NSS Stores
 	nssStores := systemstore.DiscoverNSSStores()
+	log.Printf("DEBUG: ScanSystemStores: discovered %d NSS stores", len(nssStores))
 	for _, s := range nssStores {
-		ids, err := s.List(ctx)
+		log.Printf("DEBUG: ScanSystemStores: scanning NSS store label=%q profile=%q", s.Label, s.ProfileDir)
+		ids, err := safeList(s.List, ctx, "NSS store "+s.Label)
 		if err == nil {
 			all = append(all, ids...)
+			log.Printf("DEBUG: ScanSystemStores: NSS store %q returned %d identities", s.Label, len(ids))
+		} else {
+			log.Printf("DEBUG: ScanSystemStores: NSS store %q error: %v", s.Label, err)
 		}
 	}
-	
+
 	a.mu.Lock()
 	defer a.mu.Unlock()
-	
+
 	// Deduplicate based on Fingerprint
 	seen := make(map[string]bool)
 	for _, id := range a.Identities {
 		seen[fmt.Sprintf("%x", id.Fingerprint256)] = true
 	}
-	
+
 	var filtered []pkcs12store.Identity
 	for _, sid := range all {
 		fp := fmt.Sprintf("%x", sid.Fingerprint256)
 		if !seen[fp] {
 			filtered = append(filtered, sid)
-			seen[fp] = true 
+			seen[fp] = true
 		}
 	}
-	
+
 	a.SystemIdentities = filtered
+	log.Printf("DEBUG: ScanSystemStores finished in %s, total=%d, new=%d", time.Since(start), len(all), len(filtered))
+}
+
+func safeList(fn func(context.Context) ([]pkcs12store.Identity, error), ctx context.Context, label string) (ids []pkcs12store.Identity, err error) {
+	defer func() {
+		if r := recover(); r != nil {
+			log.Printf("ERROR: panic while listing %s: %v\n%s", label, r, string(debug.Stack()))
+			ids = nil
+			err = fmt.Errorf("panic while listing %s", label)
+		}
+	}()
+	return fn(ctx)
 }
 
 func NewApp() (*App, error) {
@@ -121,7 +171,7 @@ func NewApp() (*App, error) {
 
 	// Initial load
 	ids, _ := store.List(context.Background())
-	app.Identities = ids
+	app.SetIdentities(ids)
 
 	if len(ids) == 0 {
 		app.ShowWizard = true

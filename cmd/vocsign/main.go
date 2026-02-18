@@ -8,10 +8,15 @@ import (
 	"gioui.org/unit"
 
 	"github.com/vocdoni/gofirma/vocsign/internal/app"
+	"github.com/vocdoni/gofirma/vocsign/internal/crypto/systemstore"
 	"github.com/vocdoni/gofirma/vocsign/internal/ui"
 )
 
 func main() {
+	if len(os.Args) > 1 && os.Args[1] == "--nss-scan-worker" {
+		os.Exit(systemstore.RunNSSScanWorker(os.Args[2:]))
+	}
+
 	vocsignApp, err := app.NewApp()
 	if err != nil {
 		log.Fatalf("Failed to initialize app: %v", err)
