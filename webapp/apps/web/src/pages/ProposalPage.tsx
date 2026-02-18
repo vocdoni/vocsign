@@ -108,7 +108,7 @@ export function ProposalPage(): JSX.Element {
         </div>
       </article>
 
-      {showGuide ? <SignerGuide signingURL={proposal.signingURL} /> : null}
+      {showGuide ? <SignerGuide /> : null}
     </section>
   );
 }

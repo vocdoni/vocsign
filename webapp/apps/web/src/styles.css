@@ -336,6 +336,21 @@ textarea {
   margin-bottom: 0.8rem;
 }
 
+.btn-recommended {
+  border-color: #2563eb;
+  background: #eaf2ff;
+}
+
+.recommended-pill {
+  font-size: 0.72rem;
+  font-weight: 700;
+  color: #1d4ed8;
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+  border-radius: 999px;
+  padding: 0.05rem 0.45rem;
+}
+
 .error-box {
   color: #991b1b;
   background: #fee2e2;
