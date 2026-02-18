@@ -2,14 +2,19 @@ package screens
 
 import (
 	"context"
+	"fmt"
+	"io"
+	"log"
+	"runtime/debug"
 	"strings"
 
+	"gioui.org/io/clipboard"
+	"gioui.org/io/transfer"
 	"gioui.org/layout"
 	"gioui.org/unit"
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
-	"github.com/atotto/clipboard"
 	"github.com/vocdoni/gofirma/vocsign/internal/app"
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/jwsverify"
 	"github.com/vocdoni/gofirma/vocsign/internal/net"
@@ -20,9 +25,9 @@ import (
 type OpenRequestScreen struct {
 	App   *app.App
 	Theme *material.Theme
-	
-	List widget.List 
-	
+
+	List widget.List
+
 	URLEditor    widget.Editor
 	StatusEditor widget.Editor
 	FetchButton  widget.Clickable
@@ -46,8 +51,17 @@ func (s *OpenRequestScreen) Layout(gtx layout.Context) layout.Dimensions {
 		if url != "" {
 			s.App.FetchStatus = "Connecting to server..."
 			s.App.ReqError = nil
-			
+
 			go func() {
+				defer func() {
+					if r := recover(); r != nil {
+						log.Printf("ERROR: panic while fetching request: %v\n%s", r, string(debug.Stack()))
+						s.App.FetchStatus = "Unexpected Error: could not process request"
+						s.App.ReqError = fmt.Errorf("panic while processing request: %v", r)
+						s.App.Invalidate()
+					}
+				}()
+
 				ctx := context.Background()
 				req, raw, err := net.Fetch(ctx, url)
 				if err != nil {
@@ -55,7 +69,7 @@ func (s *OpenRequestScreen) Layout(gtx layout.Context) layout.Dimensions {
 					s.App.ReqError = err
 					return
 				}
-				
+
 				s.App.FetchStatus = "Authenticating Request..."
 				if err := jwsverify.Verify(req); err != nil {
 					s.App.FetchStatus = "Security Validation Failed: " + err.Error()
@@ -73,8 +87,36 @@ func (s *OpenRequestScreen) Layout(gtx layout.Context) layout.Dimensions {
 	}
 
 	if s.PasteButton.Clicked(gtx) {
-		if text, err := clipboard.ReadAll(); err == nil {
-			s.URLEditor.SetText(text)
+		gtx.Execute(clipboard.ReadCmd{Tag: s})
+	}
+
+	for {
+		ev, ok := gtx.Event(transfer.TargetFilter{Target: s, Type: "application/text"})
+		if !ok {
+			break
+		}
+		switch ev := ev.(type) {
+		case transfer.DataEvent:
+			rc := ev.Open()
+			data, err := io.ReadAll(rc)
+			_ = rc.Close()
+			if err != nil {
+				s.App.FetchStatus = "Clipboard Error: could not read clipboard text"
+				s.App.ReqError = err
+				break
+			}
+			txt := strings.TrimSpace(string(data))
+			if txt == "" {
+				s.App.FetchStatus = "Clipboard is empty"
+				s.App.ReqError = nil
+				break
+			}
+			s.URLEditor.SetText(txt)
+			s.App.FetchStatus = "Signing URL pasted from clipboard"
+			s.App.ReqError = nil
+		case transfer.CancelEvent:
+			s.App.FetchStatus = "Clipboard paste canceled"
+			s.App.ReqError = nil
 		}
 	}
 
@@ -83,11 +125,11 @@ func (s *OpenRequestScreen) Layout(gtx layout.Context) layout.Dimensions {
 	}
 
 	return material.List(s.Theme, &s.List).Layout(gtx, 1, func(gtx layout.Context, index int) layout.Dimensions {
-		return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
+		return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					gtx.Constraints.Min.X = gtx.Constraints.Max.X
 					return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
-						gtx.Constraints.Min.X = gtx.Dp(500)
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Paste the Signing URL provided by the organizer:", s.Theme.Palette.Fg, unit.Sp(16))
@@ -112,13 +154,12 @@ func (s *OpenRequestScreen) Layout(gtx layout.Context) layout.Dimensions {
 						)
 					})
 				}),
-				
-				layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					if s.App.FetchStatus == "" { return layout.Dimensions{} }
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return material.Body2(s.Theme, s.App.FetchStatus).Layout(gtx)
-					})
+					if s.App.FetchStatus == "" {
+						return layout.Dimensions{}
+					}
+					return material.Body2(s.Theme, s.App.FetchStatus).Layout(gtx)
 				}),
 			)
 		})

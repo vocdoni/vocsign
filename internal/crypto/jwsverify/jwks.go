@@ -1,7 +1,9 @@
 package jwsverify
 
 import (
-	"crypto/rsa"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
@@ -19,8 +21,9 @@ type JWK struct {
 	KTY string `json:"kty"`
 	ALG string `json:"alg"`
 	USE string `json:"use"`
-	N   string `json:"n"`
-	E   string `json:"e"`
+	CRV string `json:"crv"`
+	X   string `json:"x"`
+	Y   string `json:"y"`
 }
 
 func FetchJWKS(url string) (*JWKS, error) {
@@ -42,30 +45,29 @@ func FetchJWKS(url string) (*JWKS, error) {
 	return &jwks, nil
 }
 
-func (jwk *JWK) ToPublicKey() (*rsa.PublicKey, error) {
-	if jwk.KTY != "RSA" {
+func (jwk *JWK) ToPublicKey() (crypto.PublicKey, error) {
+	if jwk.KTY != "EC" {
 		return nil, fmt.Errorf("unsupported key type: %s", jwk.KTY)
 	}
+	if jwk.CRV != "P-256" {
+		return nil, fmt.Errorf("unsupported curve: %s", jwk.CRV)
+	}
 
-	nBytes, err := base64.RawURLEncoding.DecodeString(jwk.N)
+	xBytes, err := base64.RawURLEncoding.DecodeString(jwk.X)
 	if err != nil {
-		return nil, fmt.Errorf("invalid modulus: %w", err)
+		return nil, fmt.Errorf("invalid x coordinate: %w", err)
 	}
-	eBytes, err := base64.RawURLEncoding.DecodeString(jwk.E)
+	yBytes, err := base64.RawURLEncoding.DecodeString(jwk.Y)
 	if err != nil {
-		return nil, fmt.Errorf("invalid exponent: %w", err)
+		return nil, fmt.Errorf("invalid y coordinate: %w", err)
 	}
 
-	var n big.Int
-	n.SetBytes(nBytes)
-
-	var e int
-	for _, b := range eBytes {
-		e = e<<8 | int(b)
+	x := new(big.Int).SetBytes(xBytes)
+	y := new(big.Int).SetBytes(yBytes)
+	curve := elliptic.P256()
+	if !curve.IsOnCurve(x, y) {
+		return nil, fmt.Errorf("invalid EC point")
 	}
 
-	return &rsa.PublicKey{
-		N: &n,
-		E: e,
-	}, nil
+	return &ecdsa.PublicKey{Curve: curve, X: x, Y: y}, nil
 }

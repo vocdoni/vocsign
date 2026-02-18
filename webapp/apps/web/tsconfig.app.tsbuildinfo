@@ -1,0 +1,1 @@
+{"root":["./src/App.tsx","./src/api.ts","./src/main.tsx","./src/types.ts","./src/components/Header.tsx","./src/components/ProgressBar.tsx","./src/components/SignerGuide.tsx","./src/pages/CreateProposalPage.tsx","./src/pages/DashboardPage.tsx","./src/pages/HowToSignPage.tsx","./src/pages/ProposalPage.tsx"],"version":"5.9.3"}

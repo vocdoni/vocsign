@@ -5,7 +5,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/vocdoni/gofirma/vocsign/internal/model"
@@ -31,8 +33,10 @@ func Submit(ctx context.Context, callbackURL string, resp *model.SignResponse) (
 	defer httpResp.Body.Close()
 
 	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
-		// Try to read body for error details
-		// ...
+		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
+		if len(body) > 0 {
+			return nil, fmt.Errorf("unexpected status code: %d: %s", httpResp.StatusCode, strings.TrimSpace(string(body)))
+		}
 		return nil, fmt.Errorf("unexpected status code: %d", httpResp.StatusCode)
 	}
 

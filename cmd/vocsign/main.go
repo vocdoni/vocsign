@@ -21,7 +21,7 @@ func main() {
 		w := new(gioapp.Window)
 		w.Option(
 			gioapp.Title("VocSign"),
-			gioapp.Size(unit.Dp(1040), unit.Dp(780)),
+			gioapp.Size(unit.Dp(1280), unit.Dp(920)),
 		)
 		if err := ui.Run(w, vocsignApp); err != nil {
 			log.Fatalf("UI failed: %v", err)

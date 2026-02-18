@@ -1,0 +1,21 @@
+{
+  "name": "vocsign-portal",
+  "private": true,
+  "version": "1.0.0",
+  "workspaces": [
+    "apps/api",
+    "apps/web"
+  ],
+  "scripts": {
+    "dev": "concurrently -n api,web -c blue,green \"npm:dev -w apps/api\" \"npm:dev -w apps/web\"",
+    "build": "npm run build -w apps/web && npm run build -w apps/api",
+    "start": "npm run start -w apps/api",
+    "lint": "npm run lint -w apps/api && npm run lint -w apps/web"
+  },
+  "devDependencies": {
+    "@eslint/js": "^9.39.2",
+    "concurrently": "^9.2.1",
+    "typescript": "^5.7.3",
+    "typescript-eslint": "^8.46.2"
+  }
+}

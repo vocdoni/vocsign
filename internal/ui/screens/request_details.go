@@ -132,112 +132,122 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 		if certID != "" {
 			identity := s.findIdentity(certID)
 			if identity != nil {
-				s.IsSigning = true
-				s.App.SignStatus = "Preparing legally compliant XML..."
+				nom := strings.TrimSpace(s.NomEditor.Text())
+				cognom1 := strings.TrimSpace(s.Cognom1Editor.Text())
+				cognom2 := strings.TrimSpace(s.Cognom2Editor.Text())
+				dni := strings.TrimSpace(s.DNIEditor.Text())
+				if dni == "" {
+					s.App.SignStatus = "Validation failed: signer ID/DNI is required"
+				} else if nom == "" && cognom1 == "" && cognom2 == "" {
+					s.App.SignStatus = "Validation failed: signer name is required"
+				} else {
+					s.IsSigning = true
+					s.App.SignStatus = "Preparing legally compliant XML..."
 
-				reqCopy := *req
-				identityID := identity.ID
-				identityCert := identity.Cert
-				identityChain := identity.Chain
-				isSystem := strings.HasPrefix(identityID, "nss:") || strings.HasPrefix(identityID, "os:")
-				identitySigner := identity.Signer
+					reqCopy := *req
+					identityID := identity.ID
+					identityCert := identity.Cert
+					identityChain := identity.Chain
+					isSystem := strings.HasPrefix(identityID, "nss:") || strings.HasPrefix(identityID, "os:")
+					identitySigner := identity.Signer
 
-				signerData := model.Signant{
-					Nom:             s.NomEditor.Text(),
-					Cognom1:         s.Cognom1Editor.Text(),
-					Cognom2:         s.Cognom2Editor.Text(),
-					TipusIdentifica: "DNI",
-					NumIdentifica:   s.DNIEditor.Text(),
-					DataNaixement:   s.BirthEditor.Text(),
-				}
-
-				go func() {
-					ctx := context.Background()
-					defer func() { s.IsSigning = false }()
-
-					var signer crypto.Signer
-					var err error
-					if isSystem {
-						signer = identitySigner
-					} else {
-						signer, err = s.App.Store.Unlock(ctx, identityID)
+					signerData := model.Signant{
+						Nom:             nom,
+						Cognom1:         cognom1,
+						Cognom2:         cognom2,
+						TipusIdentifica: "DNI",
+						NumIdentifica:   dni,
+						DataNaixement:   strings.TrimSpace(s.BirthEditor.Text()),
 					}
 
-					if err != nil || signer == nil {
-						if err == nil {
-							err = fmt.Errorf("signer is nil")
+					go func() {
+						ctx := context.Background()
+						defer func() { s.IsSigning = false }()
+
+						var signer crypto.Signer
+						var err error
+						if isSystem {
+							signer = identitySigner
+						} else {
+							signer, err = s.App.Store.Unlock(ctx, identityID)
 						}
-						s.App.SignStatus = "Unlock failed: " + err.Error()
-						return
-					}
 
-					xmlBytes, err := model.GenerateILPXML(&reqCopy, signerData)
-					if err != nil {
-						s.App.SignStatus = "XML generation failed: " + err.Error()
-						return
-					}
+						if err != nil || signer == nil {
+							if err == nil {
+								err = fmt.Errorf("signer is nil")
+							}
+							s.App.SignStatus = "Unlock failed: " + err.Error()
+							return
+						}
 
-					s.App.SignStatus = "Signing XML payload..."
-					signatureDER, err := cades.SignDetached(ctx, signer, identityCert, identityChain, xmlBytes, cades.SignOpts{
-						SigningTime: time.Now(),
-						Policy:      reqCopy.Policy,
-					})
-					if err != nil {
-						s.App.SignStatus = "Signing failed: " + err.Error()
-						return
-					}
+						xmlBytes, err := model.GenerateILPXML(&reqCopy, signerData)
+						if err != nil {
+							s.App.SignStatus = "XML generation failed: " + err.Error()
+							return
+						}
 
-					payloadHash := sha256.Sum256(xmlBytes)
-					certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: identityCert.Raw}))
-					var chainPEM []string
-					for _, c := range identityChain {
-						chainPEM = append(chainPEM, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})))
-					}
+						s.App.SignStatus = "Signing XML payload..."
+						signatureDER, err := cades.SignDetached(ctx, signer, identityCert, identityChain, xmlBytes, cades.SignOpts{
+							SigningTime: time.Now(),
+							Policy:      reqCopy.Policy,
+						})
+						if err != nil {
+							s.App.SignStatus = "Signing failed: " + err.Error()
+							return
+						}
 
-					resp := &model.SignResponse{
-						Version:                "1.0",
-						RequestID:              reqCopy.RequestID,
-						Nonce:                  reqCopy.Nonce,
-						SignedAt:               time.Now().Format(time.RFC3339),
-						PayloadCanonicalSHA256: base64.StdEncoding.EncodeToString(payloadHash[:]),
-						SignatureFormat:        "CAdES-detached",
-						SignatureDerBase64:     base64.StdEncoding.EncodeToString(signatureDER),
-						SignerCertPEM:          certPEM,
-						ChainPEM:               chainPEM,
-						SignerXMLBase64:        base64.StdEncoding.EncodeToString(xmlBytes),
-						Client: model.ClientInfo{
-							App:     "vocsign",
-							Version: "0.1.0",
-							OS:      runtime.GOOS,
-						},
-					}
+						payloadHash := sha256.Sum256(xmlBytes)
+						certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: identityCert.Raw}))
+						var chainPEM []string
+						for _, c := range identityChain {
+							chainPEM = append(chainPEM, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})))
+						}
 
-					s.App.SignStatus = "Submitting signature..."
-					receipt, err := net.Submit(ctx, reqCopy.Callback.URL, resp)
+						resp := &model.SignResponse{
+							Version:                "1.0",
+							RequestID:              reqCopy.RequestID,
+							Nonce:                  reqCopy.Nonce,
+							SignedAt:               time.Now().Format(time.RFC3339),
+							PayloadCanonicalSHA256: base64.StdEncoding.EncodeToString(payloadHash[:]),
+							SignatureFormat:        "CAdES-detached",
+							SignatureDerBase64:     base64.StdEncoding.EncodeToString(signatureDER),
+							SignerCertPEM:          certPEM,
+							ChainPEM:               chainPEM,
+							SignerXMLBase64:        base64.StdEncoding.EncodeToString(xmlBytes),
+							Client: model.ClientInfo{
+								App:     "vocsign",
+								Version: "0.1.0",
+								OS:      runtime.GOOS,
+							},
+						}
 
-					auditEntry := storage.AuditEntry{
-						RequestID:       reqCopy.RequestID,
-						ProposalTitle:   reqCopy.Proposal.Title,
-						SignerName:      signerData.Nom + " " + signerData.Cognom1 + " " + signerData.Cognom2,
-						SignerDNI:       signerData.NumIdentifica,
-						CallbackHost:    "server",
-						CertFingerprint: fmt.Sprintf("%x", pkcs12store.Fingerprint(identityCert)),
-					}
+						s.App.SignStatus = "Submitting signature..."
+						receipt, err := net.Submit(ctx, reqCopy.Callback.URL, resp)
 
-					if err != nil {
-						s.App.SignStatus = "Submission failed: " + err.Error()
-						auditEntry.Status = "fail"
-						auditEntry.Error = err.Error()
+						auditEntry := storage.AuditEntry{
+							RequestID:       reqCopy.RequestID,
+							ProposalTitle:   reqCopy.Proposal.Title,
+							SignerName:      signerData.Nom + " " + signerData.Cognom1 + " " + signerData.Cognom2,
+							SignerDNI:       signerData.NumIdentifica,
+							CallbackHost:    "server",
+							CertFingerprint: fmt.Sprintf("%x", pkcs12store.Fingerprint(identityCert)),
+						}
+
+						if err != nil {
+							s.App.SignStatus = "Submission failed: " + err.Error()
+							auditEntry.Status = "fail"
+							auditEntry.Error = err.Error()
+							s.App.AuditLogger.Log(auditEntry)
+							return
+						}
+
+						s.App.SignResponse = resp
+						auditEntry.Status = "success"
+						auditEntry.ServerAckID = receipt.ReceiptID
 						s.App.AuditLogger.Log(auditEntry)
-						return
-					}
-
-					s.App.SignResponse = resp
-					auditEntry.Status = "success"
-					auditEntry.ServerAckID = receipt.ReceiptID
-					s.App.AuditLogger.Log(auditEntry)
-					s.App.Invalidate()
-				}()
+						s.App.Invalidate()
+					}()
+				}
 			}
 		}
 	}
@@ -256,229 +266,223 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 
 	return material.List(s.Theme, &s.MainList).Layout(gtx, 1, func(gtx layout.Context, index int) layout.Dimensions {
 		return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-			maxWidth := gtx.Dp(1120)
-			if gtx.Constraints.Max.X > maxWidth {
-				gtx.Constraints.Max.X = maxWidth
-			}
-			return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-				gtx.Constraints.Min.X = gtx.Constraints.Max.X
-				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "SIGN REQUEST", s.Theme.Palette.ContrastBg, unit.Sp(22))
-							}),
+			gtx.Constraints.Min.X = gtx.Constraints.Max.X
+			return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "SIGN REQUEST", s.Theme.Palette.ContrastBg, unit.Sp(22))
+						}),
+						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+							if s.backButton.Clicked(gtx) {
+								s.App.CurrentScreen = app.ScreenOpenRequest
+							}
+							btn := material.Button(s.Theme, &s.backButton, "Back")
+							btn.Background = widgets.ColorBorder
+							btn.Color = s.Theme.Palette.Fg
+							btn.TextSize = unit.Sp(12)
+							return btn.Layout(gtx)
+						}),
+					)
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
+
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								if s.backButton.Clicked(gtx) {
-									s.App.CurrentScreen = app.ScreenOpenRequest
-								}
-								btn := material.Button(s.Theme, &s.backButton, "Back")
-								btn.Background = widgets.ColorBorder
-								btn.Color = s.Theme.Palette.Fg
-								btn.TextSize = unit.Sp(12)
-								return btn.Layout(gtx)
+								l := material.H6(s.Theme, req.Proposal.Title)
+								l.Color = s.Theme.Palette.ContrastBg
+								return l.Layout(gtx)
+							}),
+							layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+							layout.Rigid(material.Body1(s.Theme, req.Proposal.Summary).Layout),
+							layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+									layout.Rigid(material.Caption(s.Theme, "Promoter: ").Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										l := material.Caption(s.Theme, req.Proposal.Promoter)
+										l.Font.Weight = font.Bold
+										return l.Layout(gtx)
+									}),
+									layout.Flexed(1, layout.Spacer{Width: unit.Dp(1)}.Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										btn := material.Button(s.Theme, &s.DocLinkButton, "View Full Text")
+										btn.TextSize = unit.Sp(12)
+										return btn.Layout(gtx)
+									}),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
+									layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+										if req.Policy == nil {
+											return layout.Dimensions{}
+										}
+										btn := material.Button(s.Theme, &s.PolicyLinkButton, "Policy")
+										btn.TextSize = unit.Sp(12)
+										btn.Background = widgets.ColorWarning
+										return btn.Layout(gtx)
+									}),
+								)
 							}),
 						)
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(14)}.Layout),
+					})
+				}),
 
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									l := material.H6(s.Theme, req.Proposal.Title)
-									l.Color = s.Theme.Palette.ContrastBg
-									return l.Layout(gtx)
-								}),
-								layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-								layout.Rigid(material.Body1(s.Theme, req.Proposal.Summary).Layout),
-								layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-										layout.Rigid(material.Caption(s.Theme, "Promoter: ").Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											l := material.Caption(s.Theme, req.Proposal.Promoter)
-											l.Font.Weight = font.Bold
-											return l.Layout(gtx)
-										}),
-										layout.Flexed(1, layout.Spacer{Width: unit.Dp(1)}.Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											btn := material.Button(s.Theme, &s.DocLinkButton, "View Full Text")
-											btn.TextSize = unit.Sp(12)
-											return btn.Layout(gtx)
-										}),
-										layout.Rigid(layout.Spacer{Width: unit.Dp(8)}.Layout),
-										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											if req.Policy == nil {
-												return layout.Dimensions{}
-											}
-											btn := material.Button(s.Theme, &s.PolicyLinkButton, "Policy")
-											btn.TextSize = unit.Sp(12)
-											btn.Background = widgets.ColorWarning
-											return btn.Layout(gtx)
-										}),
-									)
-								}),
-							)
-						})
-					}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "SIGNATURE WORKSPACE", s.Theme.Palette.Fg, unit.Sp(18))
+				}),
+				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 
-					layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "SIGNATURE WORKSPACE", s.Theme.Palette.Fg, unit.Sp(18))
-					}),
-					layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-
-					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-						return widgets.CustomCard(gtx, color.NRGBA{R: 0xF3, G: 0xF6, B: 0xFC, A: 0xFF}, unit.Dp(18), func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									if strings.TrimSpace(req.Proposal.LegalStatement) == "" {
-										return layout.Dimensions{}
-									}
-									return layout.Inset{Bottom: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-										return widgets.Border(gtx, widgets.ColorWarning, func(gtx layout.Context) layout.Dimensions {
-											return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-												return material.Body2(s.Theme, req.Proposal.LegalStatement).Layout(gtx)
-											})
+				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+					return widgets.CustomCard(gtx, color.NRGBA{R: 0xF3, G: 0xF6, B: 0xFC, A: 0xFF}, unit.Dp(18), func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								if strings.TrimSpace(req.Proposal.LegalStatement) == "" {
+									return layout.Dimensions{}
+								}
+								return layout.Inset{Bottom: unit.Dp(14)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+									return widgets.Border(gtx, widgets.ColorWarning, func(gtx layout.Context) layout.Dimensions {
+										return layout.UniformInset(unit.Dp(10)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+											return material.Body2(s.Theme, req.Proposal.LegalStatement).Layout(gtx)
 										})
 									})
-								}),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									leftPane := func(gtx layout.Context) layout.Dimensions {
-										return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-												layout.Rigid(material.Subtitle2(s.Theme, "1. Choose Certificate").Layout),
-												layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													var children []layout.FlexChild
-													if len(groups.Personal) > 0 {
-														children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-															return material.Caption(s.Theme, "PERSONAL").Layout(gtx)
-														}))
-														for i := range groups.Personal {
-															children = append(children, layout.Rigid(s.certPickerRow(groups.Personal[i])))
-														}
-													}
-													if len(groups.Representation) > 0 {
-														children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-															l := material.Caption(s.Theme, "REPRESENTATION")
-															l.Color = widgets.ColorWarning
-															return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, l.Layout)
-														}))
-														for i := range groups.Representation {
-															children = append(children, layout.Rigid(s.certPickerRow(groups.Representation[i])))
-														}
-													}
-													return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
-												}),
-											)
-										})
-									}
-									rightPane := func(gtx layout.Context) layout.Dimensions {
-										return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
-											if s.CertEnum.Value == "" {
-												return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-													return material.Body2(s.Theme, "Select a certificate to review signer data.").Layout(gtx)
-												})
-											}
-											return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-												layout.Rigid(material.Subtitle2(s.Theme, "2. Verify Signer Data").Layout),
-												layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-														layout.Flexed(1, material.Editor(s.Theme, &s.NomEditor, "Name").Layout),
-														layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-														layout.Flexed(1, material.Editor(s.Theme, &s.DNIEditor, "DNI/NIE").Layout),
-													)
-												}),
-												layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-														layout.Flexed(1, material.Editor(s.Theme, &s.Cognom1Editor, "Surname 1").Layout),
-														layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
-														layout.Flexed(1, material.Editor(s.Theme, &s.Cognom2Editor, "Surname 2").Layout),
-													)
-												}),
-												layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-														layout.Rigid(material.Body2(s.Theme, "Birth Date: ").Layout),
-														layout.Flexed(1, material.Editor(s.Theme, &s.BirthEditor, "YYYY-MM-DD").Layout),
-													)
-												}),
-												layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													txt := "Personal identity certificate"
-													clr := widgets.ColorSuccess
-													icon := icons.IconCheck
-													if s.selectedInfo.IsRepresentative {
-														txt = "Representative certificate"
-														clr = widgets.ColorWarning
-														icon = icons.IconWarning
-														if s.selectedInfo.OrganizationID != "" {
-															txt = "Representative cert (Org ID: " + s.selectedInfo.OrganizationID + ")"
-														}
-													}
-													return widgets.Border(gtx, clr, func(gtx layout.Context) layout.Dimensions {
-														return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-															return widgets.IconLabel(gtx, s.Theme, icon, txt, clr, unit.Sp(12))
-														})
-													})
-												}),
-											)
-										})
-									}
-
-									isCompact := gtx.Constraints.Max.X < gtx.Dp(900)
-									if isCompact {
+								})
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								leftPane := func(gtx layout.Context) layout.Dimensions {
+									return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
 										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
-											layout.Rigid(leftPane),
-											layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
-											layout.Rigid(rightPane),
+											layout.Rigid(material.Subtitle2(s.Theme, "1. Choose Certificate").Layout),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												var children []layout.FlexChild
+												if len(groups.Personal) > 0 {
+													children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														return material.Caption(s.Theme, "PERSONAL").Layout(gtx)
+													}))
+													for i := range groups.Personal {
+														children = append(children, layout.Rigid(s.certPickerRow(groups.Personal[i])))
+													}
+												}
+												if len(groups.Representation) > 0 {
+													children = append(children, layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														l := material.Caption(s.Theme, "REPRESENTATION")
+														l.Color = widgets.ColorWarning
+														return layout.Inset{Top: unit.Dp(10)}.Layout(gtx, l.Layout)
+													}))
+													for i := range groups.Representation {
+														children = append(children, layout.Rigid(s.certPickerRow(groups.Representation[i])))
+													}
+												}
+												return layout.Flex{Axis: layout.Vertical}.Layout(gtx, children...)
+											}),
 										)
-									}
-
-									return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-										layout.Flexed(0.95, leftPane),
-										layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-										layout.Flexed(1.05, rightPane),
-									)
-								}),
-
-								layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
-										return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-											return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-												layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-													if s.App.SignStatus == "" {
-														l := material.Body2(s.Theme, "Please verify all details. Your signature will be legally binding.")
-														l.Color = s.Theme.Palette.Fg
-														return l.Layout(gtx)
-													}
-													return material.Editor(s.Theme, &s.StatusEditor, "").Layout(gtx)
-												}),
-												layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
-												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-													btn := material.Button(s.Theme, &s.SignButton, "CONFIRM & SIGN")
-													if s.IsSigning || s.CertEnum.Value == "" {
-														btn.Background = widgets.ColorBorder
-													} else {
-														btn.Background = s.Theme.Palette.ContrastBg
-													}
-													btn.TextSize = unit.Sp(18)
-													return btn.Layout(gtx)
-												}),
-											)
-										})
 									})
-								}),
-							)
-						})
-					}),
-				)
-			})
+								}
+								rightPane := func(gtx layout.Context) layout.Dimensions {
+									return widgets.Card(gtx, widgets.ColorSurface, func(gtx layout.Context) layout.Dimensions {
+										if s.CertEnum.Value == "" {
+											return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+												return material.Body2(s.Theme, "Select a certificate to review signer data.").Layout(gtx)
+											})
+										}
+										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+											layout.Rigid(material.Subtitle2(s.Theme, "2. Verify Signer Data").Layout),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+													layout.Flexed(1, material.Editor(s.Theme, &s.NomEditor, "Name").Layout),
+													layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+													layout.Flexed(1, material.Editor(s.Theme, &s.DNIEditor, "DNI/NIE").Layout),
+												)
+											}),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+													layout.Flexed(1, material.Editor(s.Theme, &s.Cognom1Editor, "Surname 1").Layout),
+													layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
+													layout.Flexed(1, material.Editor(s.Theme, &s.Cognom2Editor, "Surname 2").Layout),
+												)
+											}),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+													layout.Rigid(material.Body2(s.Theme, "Birth Date: ").Layout),
+													layout.Flexed(1, material.Editor(s.Theme, &s.BirthEditor, "YYYY-MM-DD").Layout),
+												)
+											}),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												txt := "Personal identity certificate"
+												clr := widgets.ColorSuccess
+												icon := icons.IconCheck
+												if s.selectedInfo.IsRepresentative {
+													txt = "Representative certificate"
+													clr = widgets.ColorWarning
+													icon = icons.IconWarning
+													if s.selectedInfo.OrganizationID != "" {
+														txt = "Representative cert (Org ID: " + s.selectedInfo.OrganizationID + ")"
+													}
+												}
+												return widgets.Border(gtx, clr, func(gtx layout.Context) layout.Dimensions {
+													return layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+														return widgets.IconLabel(gtx, s.Theme, icon, txt, clr, unit.Sp(12))
+													})
+												})
+											}),
+										)
+									})
+								}
+
+								isCompact := gtx.Constraints.Max.X < gtx.Dp(900)
+								if isCompact {
+									return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+										layout.Rigid(leftPane),
+										layout.Rigid(layout.Spacer{Height: unit.Dp(12)}.Layout),
+										layout.Rigid(rightPane),
+									)
+								}
+
+								return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+									layout.Flexed(0.95, leftPane),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+									layout.Flexed(1.05, rightPane),
+								)
+							}),
+
+							layout.Rigid(layout.Spacer{Height: unit.Dp(18)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
+									return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
+											layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+												if s.App.SignStatus == "" {
+													l := material.Body2(s.Theme, "Please verify all details. Your signature will be legally binding.")
+													l.Color = s.Theme.Palette.Fg
+													return l.Layout(gtx)
+												}
+												return material.Editor(s.Theme, &s.StatusEditor, "").Layout(gtx)
+											}),
+											layout.Rigid(layout.Spacer{Width: unit.Dp(16)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												btn := material.Button(s.Theme, &s.SignButton, "CONFIRM & SIGN")
+												if s.IsSigning || s.CertEnum.Value == "" {
+													btn.Background = widgets.ColorBorder
+												} else {
+													btn.Background = s.Theme.Palette.ContrastBg
+												}
+												btn.TextSize = unit.Sp(18)
+												return btn.Layout(gtx)
+											}),
+										)
+									})
+								})
+							}),
+						)
+					})
+				}),
+			)
 		})
 	})
 }
@@ -521,88 +525,65 @@ func (s *RequestDetailsScreen) certPickerRow(id pkcs12store.Identity) layout.Wid
 
 func (s *RequestDetailsScreen) layoutPostSign(gtx layout.Context) layout.Dimensions {
 	resp := s.App.SignResponse
-	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-		layout.Rigid(layout.Spacer{Height: unit.Dp(40)}.Layout),
-
-		// Hero Success Indicator
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			return widgets.IconLabel(gtx, s.Theme, icons.IconCheck, "SIGNATURE SUCCESSFULLY PROCESSED", widgets.ColorSuccess, unit.Sp(28))
-		}),
-		layout.Rigid(layout.Spacer{Height: unit.Dp(48)}.Layout),
-
-		// Formal Certificate of Receipt
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			gtx.Constraints.Max.X = gtx.Dp(700)
-			return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
-				return widgets.CustomCard(gtx, widgets.ColorSurface, unit.Dp(32), func(gtx layout.Context) layout.Dimensions {
-					return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "OFFICIAL RECEIPT", s.Theme.Palette.ContrastBg, unit.Sp(14))
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
-
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-								layout.Rigid(material.Caption(s.Theme, "RECEIPT IDENTIFIER").Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									e := &widget.Editor{ReadOnly: true}
-									e.SetText(s.App.SignStatus)
-									return material.Editor(s.Theme, e, "").Layout(gtx)
-								}),
-							)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
-
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-										layout.Rigid(material.Caption(s.Theme, "SIGNATURE TIMESTAMP").Layout),
-										layout.Rigid(material.Body2(s.Theme, resp.SignedAt).Layout),
-									)
-								}),
-								layout.Rigid(layout.Spacer{Width: unit.Dp(48)}.Layout),
-								layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-									return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-										layout.Rigid(material.Caption(s.Theme, "FORMAT").Layout),
-										layout.Rigid(material.Body2(s.Theme, resp.SignatureFormat).Layout),
-									)
-								}),
-							)
-						}),
-						layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
-
-						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-							return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
-								layout.Rigid(material.Caption(s.Theme, "CANONICAL PAYLOAD DIGEST (SHA256)").Layout),
-								layout.Rigid(material.Body2(s.Theme, resp.PayloadCanonicalSHA256).Layout),
-							)
-						}),
-					)
-				})
-			})
-		}),
-
-		layout.Rigid(layout.Spacer{Height: unit.Dp(64)}.Layout),
-
-		// Centered Home Button with Vector Icon
-		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-			if s.backButton.Clicked(gtx) {
-				s.App.SignResponse = nil
-				s.App.SignStatus = ""
-				s.App.CurrentScreen = app.ScreenOpenRequest
-			}
-
-			return material.Clickable(gtx, &s.backButton, func(gtx layout.Context) layout.Dimensions {
-				return widgets.CustomCard(gtx, s.Theme.Palette.ContrastBg, unit.Dp(16), func(gtx layout.Context) layout.Dimensions {
-					gtx.Constraints.Min.X = gtx.Dp(240)
-					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return widgets.IconLabel(gtx, s.Theme, icons.IconAudit, "DONE - BACK TO HOME", s.Theme.Palette.ContrastFg, unit.Sp(16))
+	return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+		gtx.Constraints.Min.X = gtx.Constraints.Max.X
+		return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return widgets.IconLabel(gtx, s.Theme, icons.IconCheck, "SIGNATURE SUCCESSFULLY PROCESSED", widgets.ColorSuccess, unit.Sp(28))
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
+					return widgets.CustomCard(gtx, widgets.ColorSurface, unit.Dp(24), func(gtx layout.Context) layout.Dimensions {
+						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "OFFICIAL RECEIPT", s.Theme.Palette.ContrastBg, unit.Sp(14))
+							}),
+							layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return material.Caption(s.Theme, "RECEIPT IDENTIFIER").Layout(gtx)
+							}),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								e := &widget.Editor{ReadOnly: true}
+								e.SetText(s.App.SignStatus)
+								return material.Editor(s.Theme, e, "").Layout(gtx)
+							}),
+							layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+								return layout.Flex{Axis: layout.Horizontal}.Layout(gtx,
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+											layout.Rigid(material.Caption(s.Theme, "SIGNATURE TIMESTAMP").Layout),
+											layout.Rigid(material.Body2(s.Theme, resp.SignedAt).Layout),
+										)
+									}),
+									layout.Rigid(layout.Spacer{Width: unit.Dp(24)}.Layout),
+									layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+										return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+											layout.Rigid(material.Caption(s.Theme, "FORMAT").Layout),
+											layout.Rigid(material.Body2(s.Theme, resp.SignatureFormat).Layout),
+										)
+									}),
+								)
+							}),
+							layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
+							layout.Rigid(material.Caption(s.Theme, "CANONICAL PAYLOAD DIGEST (SHA256)").Layout),
+							layout.Rigid(material.Body2(s.Theme, resp.PayloadCanonicalSHA256).Layout),
+						)
 					})
 				})
-			})
-		}),
-	)
+			}),
+			layout.Rigid(layout.Spacer{Height: unit.Dp(24)}.Layout),
+			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+				if s.backButton.Clicked(gtx) {
+					s.App.SignResponse = nil
+					s.App.SignStatus = ""
+					s.App.CurrentScreen = app.ScreenOpenRequest
+				}
+				return material.Button(s.Theme, &s.backButton, "DONE - BACK TO HOME").Layout(gtx)
+			}),
+		)
+	})
 }
 
 func (s *RequestDetailsScreen) findIdentity(id string) *pkcs12store.Identity {

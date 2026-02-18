@@ -15,12 +15,12 @@ import (
 	"gioui.org/widget"
 	"gioui.org/widget/material"
 
+	"gioui.org/x/explorer"
 	"github.com/vocdoni/gofirma/vocsign/internal/app"
 	"github.com/vocdoni/gofirma/vocsign/internal/ui/assets"
 	"github.com/vocdoni/gofirma/vocsign/internal/ui/icons"
 	"github.com/vocdoni/gofirma/vocsign/internal/ui/screens"
 	"github.com/vocdoni/gofirma/vocsign/internal/ui/widgets"
-	"gioui.org/x/explorer"
 )
 
 func Run(w *gioapp.Window, a *app.App) error {
@@ -46,9 +46,9 @@ func Run(w *gioapp.Window, a *app.App) error {
 
 	// Navigation state
 	var (
-		tabCert  widget.Clickable
-		tabOpen  widget.Clickable
-		tabAudit widget.Clickable
+		tabCert   widget.Clickable
+		tabOpen   widget.Clickable
+		tabAudit  widget.Clickable
 		logoClick widget.Clickable
 	)
 
@@ -105,7 +105,7 @@ func Run(w *gioapp.Window, a *app.App) error {
 			}
 
 			// Main Background & App Border
-			layout.UniformInset(unit.Dp(8)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+			layout.UniformInset(unit.Dp(4)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 				return widgets.Border(gtx, widgets.ColorBorder, func(gtx layout.Context) layout.Dimensions {
 					return widgets.Card(gtx, th.Palette.Bg, func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{
@@ -128,7 +128,7 @@ func Run(w *gioapp.Window, a *app.App) error {
 													return widgets.IconLabel(gtx, th, icons.IconVocSign, "VocSign", th.Palette.ContrastBg, unit.Sp(20))
 												}),
 												layout.Rigid(layout.Spacer{Width: unit.Dp(32)}.Layout),
-												
+
 												layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 													bg := color.NRGBA{A: 0}
 													fg := th.Palette.Fg
@@ -189,7 +189,7 @@ func Run(w *gioapp.Window, a *app.App) error {
 							}),
 							// Screen Content
 							layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-								return layout.UniformInset(unit.Dp(24)).Layout(gtx, current)
+								return layout.UniformInset(unit.Dp(12)).Layout(gtx, current)
 							}),
 							// Footer with Logo
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {

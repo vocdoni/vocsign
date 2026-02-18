@@ -1,0 +1,5 @@
+<svg width="160" height="40" viewBox="0 0 160 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <rect width="40" height="40" rx="10" fill="#0B3D91"/>
+  <path d="M10 13L20 29L30 13" stroke="#FFFFFF" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  <text x="50" y="25" fill="#0F172A" font-family="Segoe UI, Arial, sans-serif" font-size="18" font-weight="600">Vocdoni</text>
+</svg>
