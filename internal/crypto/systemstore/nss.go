@@ -127,8 +127,8 @@ func DiscoverNSSStores(ctx context.Context) []*NSSStore {
 		filepath.Join(home, ".thunderbird"),
 		filepath.Join(home, ".librewolf"),
 		filepath.Join(home, ".waterfox"),
-		filepath.Join(home, ".var", "app"),  // flatpak user data
-		filepath.Join(home, "snap"),         // snap user data
+		filepath.Join(home, ".var", "app"), // flatpak user data
+		filepath.Join(home, "snap"),        // snap user data
 		filepath.Join(home, ".local", "share"),
 		localAppDataDir(),
 		appDataDir(),
@@ -369,7 +369,9 @@ func (s *NSSStore) listDirect(ctx context.Context) ([]pkcs12store.Identity, erro
 	}
 	defer p.Destroy()
 
-	os.Setenv("NSS_CONFIG_DIR", "sql:"+s.ProfileDir)
+	if err := os.Setenv("NSS_CONFIG_DIR", "sql:"+s.ProfileDir); err != nil {
+		return nil, fmt.Errorf("failed to set NSS_CONFIG_DIR: %w", err)
+	}
 
 	params := fmt.Sprintf("configdir='sql:%s' certPrefix='' keyPrefix='' secmod='secmod.db' flags=readOnly", s.ProfileDir)
 	pByte := append([]byte(params), 0)
@@ -382,7 +384,11 @@ func (s *NSSStore) listDirect(ctx context.Context) ([]pkcs12store.Identity, erro
 			return nil, fmt.Errorf("pkcs11 initialize failed: reserved=%v plain=%w", err, err2)
 		}
 	}
-	defer p.Finalize()
+	defer func() {
+		if err := p.Finalize(); err != nil {
+			log.Printf("warning: PKCS#11 finalize: %v", err)
+		}
+	}()
 
 	slots, err := p.GetSlotList(true)
 	if err != nil {
