@@ -67,6 +67,7 @@ export interface CreateProposalInput {
     summary: string;
     legalStatement: string;
     fullTextURL: string;
+    fullTextSHA256: string;
   };
 }
 

@@ -53,6 +53,8 @@ Use `.env.example` as reference:
 - `POLICY_OID`
 - `POLICY_URI`
 - `DEFAULT_PROPOSAL_VALIDITY_DAYS`
+- `ORGANIZER_API_KEY` (protects administrative endpoints like `DELETE /api/signatures/:signerId` for GDPR erasure)
+- `ALLOW_TEST_CERTS` (set to `true` to skip certificate issuer validation; **never enable in production**)
 - `VOCSIGN_RELEASE_BASE_URL` (optional, defaults to `https://github.com/vocdoni/vocsign/releases/latest`)
 
 ## Generate organizer private key (hex)

@@ -23,4 +23,5 @@ COPY --from=build /app/apps/api/dist apps/api/dist
 COPY --from=build /app/apps/web/dist apps/web/dist
 
 EXPOSE 8080
+USER node
 CMD ["npm", "run", "start", "-w", "apps/api"]

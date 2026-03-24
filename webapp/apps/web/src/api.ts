@@ -32,6 +32,15 @@ export async function getProposal(requestId: string): Promise<ProposalDetails> {
   return handleJSON<ProposalDetails>(res);
 }
 
+export async function hashDocument(url: string): Promise<{ sha256: string }> {
+  const res = await fetch('/api/hash-document', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ url })
+  });
+  return handleJSON(res);
+}
+
 export async function getDownloads(): Promise<DownloadsResponse> {
   const res = await fetch('/api/downloads');
   return handleJSON<DownloadsResponse>(res);
