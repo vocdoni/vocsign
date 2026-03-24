@@ -62,20 +62,23 @@ func TestGenerateIDCatCertWithAllFields(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Mirror the exact Subject DN structure of real EC-Ciutadania (IDCat)
+	// certificates: serialNumber + GN + SN + CN, no Country or OU fields.
+	// ExtraNames (not Names) must be used — Names is only populated during
+	// parsing and is ignored when marshaling.
 	userTemplate := &x509.Certificate{
 		SerialNumber: big.NewInt(2),
 		Subject: pkix.Name{
-			Country: []string{"ES"},
-			Names: []pkix.AttributeTypeAndValue{
+			ExtraNames: []pkix.AttributeTypeAndValue{
+				{Type: asn1.ObjectIdentifier{2, 5, 4, 5}, Value: "IDCES-12345678Z"},
 				{Type: asn1.ObjectIdentifier{2, 5, 4, 42}, Value: "ALBA"},
 				{Type: asn1.ObjectIdentifier{2, 5, 4, 4}, Value: "TESTER DEMO"},
-				{Type: asn1.ObjectIdentifier{2, 5, 4, 5}, Value: "IDCES-12345678Z"},
 			},
 			CommonName: "ALBA TESTER DEMO - DNI 12345678Z",
 		},
 		NotBefore: time.Now().Add(-time.Hour),
 		NotAfter:  time.Now().Add(2 * 365 * 24 * time.Hour),
-		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment | x509.KeyUsageContentCommitment,
+		KeyUsage:  x509.KeyUsageDigitalSignature | x509.KeyUsageContentCommitment,
 		ExtKeyUsage: []x509.ExtKeyUsage{
 			x509.ExtKeyUsageClientAuth,
 			x509.ExtKeyUsageEmailProtection,
@@ -107,6 +110,15 @@ func TestGenerateIDCatCertWithAllFields(t *testing.T) {
 		t.Fatal(err)
 	}
 	t.Logf("Generated %s (%d bytes)", outPath, len(p12Data))
+
+	// Also output the CA certificate as PEM so it can be loaded into the
+	// webapp trust store via EXTRA_TRUST_ROOTS for near-production testing.
+	caPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: caCert.Raw})
+	caOutPath := "certs/ec-ciutadania-test-ca.pem"
+	if err := os.WriteFile(caOutPath, caPEM, 0o644); err != nil {
+		t.Fatal(err)
+	}
+	t.Logf("Generated %s", caOutPath)
 }
 
 // TestGenerateCAdESFixtures generates CAdES signature fixtures for the

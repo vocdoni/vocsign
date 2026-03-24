@@ -126,7 +126,7 @@ export function CreateProposalPage(): JSX.Element {
                 value={form.proposal.fullTextURL}
                 onChange={(e) => setForm({ ...form, proposal: { ...form.proposal, fullTextURL: e.target.value } })}
                 onBlur={(e) => {
-                  if (e.target.value && !form.proposal.fullTextSHA256) {
+                  if (e.target.value) {
                     computeHash(e.target.value);
                   }
                 }}

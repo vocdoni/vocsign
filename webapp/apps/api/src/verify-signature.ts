@@ -145,14 +145,22 @@ export async function validateSignerCertificate(
     throw new Error(`certificate has expired (validTo: ${cert.validTo})`);
   }
 
-  // 6b. Check key usage includes digitalSignature, if the extension is present.
-  const keyUsage = cert.keyUsage;
-  if (keyUsage !== undefined && !keyUsage.includes('digitalSignature')) {
+  // 6b. Check basic Key Usage includes digitalSignature, if the extension is
+  //     present.  Note: Node.js cert.keyUsage is the *Extended* Key Usage
+  //     (OID array), not the basic Key Usage.  Parse basic KU via node-forge.
+  const forgeCert = forge.pki.certificateFromPem(cert.toString());
+  const kuExt = forgeCert.getExtension('keyUsage') as
+    | (forge.pki.CertificateExtension & { digitalSignature?: boolean })
+    | null;
+  if (kuExt && !kuExt.digitalSignature) {
     throw new Error('certificate key usage does not include digitalSignature');
   }
 
-  // Skip chain verification and revocation in test mode.
-  if (process.env.ALLOW_TEST_CERTS === 'true') {
+  // ALLOW_TEST_CERTS=true  → skip issuer, chain, and revocation (unit tests).
+  // ALLOW_TEST_CERTS=verify → run issuer + chain checks, skip only revocation
+  //                           (near-production testing with generated test CA).
+  const testCertsMode = process.env.ALLOW_TEST_CERTS;
+  if (testCertsMode === 'true') {
     return;
   }
 
@@ -172,5 +180,9 @@ export async function validateSignerCertificate(
   const issuer = await verifyChain(cert, chainPems, store);
 
   // 6e. Revocation check with LTV.
+  // Skipped in "verify" mode (test certs have no OCSP/CRL endpoints).
+  if (testCertsMode === 'verify') {
+    return;
+  }
   await checkRevocation(cert, issuer, signedAt);
 }

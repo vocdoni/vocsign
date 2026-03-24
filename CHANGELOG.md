@@ -1,5 +1,87 @@
 # Changelog
 
+## Bug fixes and improvements
+
+---
+
+### Document hash mismatch between webapp and desktop client
+
+**Files changed:** `internal/net/verify_document.go`, `webapp/apps/api/src/index.ts`
+
+**What was wrong:** The webapp (Node.js) and desktop client (Go) sent different HTTP
+headers when downloading the proposal document, causing CDNs to return different content
+(e.g. a bot challenge page for Go's default `User-Agent: Go-http-client/1.1`). This
+produced completely different SHA-256 hashes and a confusing "document hash mismatch" error.
+
+**What changed:** Both clients now send identical `User-Agent: VocSign/1.0` and
+`Accept: */*` headers. The hash-document endpoint rejects HTML/XML responses early with a
+clear error ("URL returned an HTML/XML page instead of a document file"). The mismatch
+error message now includes Content-Type and body size for easier diagnosis. The frontend
+also recomputes the hash whenever the URL field loses focus, fixing a secondary bug where
+changing the URL after an initial hash computation left a stale hash.
+
+---
+
+### Key usage check rejected valid certificates
+
+**Files changed:** `webapp/apps/api/src/verify-signature.ts`
+
+**What was wrong:** The server checked `cert.keyUsage` for the string `"digitalSignature"`,
+but Node.js `X509Certificate.keyUsage` returns Extended Key Usage OIDs (e.g.
+`1.3.6.1.5.5.7.3.2`), not basic Key Usage flags. Any certificate with an EKU extension
+was rejected regardless of its actual Key Usage bits.
+
+**What changed:** The check now parses the basic Key Usage extension (OID 2.5.29.15) via
+`node-forge` to correctly inspect the `digitalSignature` flag.
+
+---
+
+### Test certificate Subject DN did not match real IDCat certificates
+
+**Files changed:** `test/gen_certs_test.go`, `test/certs/idcat_full_nopass.p12`
+
+**What was wrong:** The test certificate generator used `pkix.Name.Names` (read-only
+during parsing) instead of `ExtraNames` (used during marshaling). Go silently dropped the
+GN, SN, and serialNumber fields, producing a cert with only C + CN in the subject. This
+caused "signer identity in XML does not match certificate subject" failures. The cert also
+included `Country` and `KeyUsageKeyEncipherment`, which real IDCat certs do not have.
+
+**What changed:** Switched to `ExtraNames`, removed `Country`, removed
+`KeyUsageKeyEncipherment`, and reordered fields to match the real EC-Ciutadania DN
+structure (`serialNumber + GN + SN + CN`). The generator also exports the test CA as a PEM
+file for trust store integration.
+
+---
+
+### Near-production test mode (`ALLOW_TEST_CERTS=verify`)
+
+**Files changed:** `webapp/apps/api/src/verify-signature.ts`, `webapp/apps/api/src/ca-trust.ts`, `webapp/apps/api/src/index.ts`
+
+**What was wrong:** `ALLOW_TEST_CERTS=true` was all-or-nothing: it skipped issuer,
+chain, and revocation checks entirely. There was no way to test the chain verification
+flow with test certificates.
+
+**What changed:** Added `ALLOW_TEST_CERTS=verify` mode which loads the test CA
+(`test/certs/ec-ciutadania-test-ca.pem`) into the trust store, runs issuer allowlist and
+chain verification, and skips only revocation (test certs lack OCSP/CRL endpoints).
+`ALLOW_TEST_CERTS=true` remains unchanged for unit tests.
+
+---
+
+### Desktop UI: stale error after failed signing
+
+**Files changed:** `internal/ui/screens/request_details.go`, `internal/ui/run.go`
+
+**What was wrong:** After a signing failure, the error message persisted when navigating
+to other tabs and back. The "Back" button navigated away but left `SignStatus` and
+`CurrentReq` set, so the stale error reappeared.
+
+**What changed:** The "Back" button now clears `SignStatus` and `CurrentReq`, returning
+to a clean Open Request page. Tab transitions away from the request details screen also
+clear `SignStatus`.
+
+---
+
 ## Security
 
 ---

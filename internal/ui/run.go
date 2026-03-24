@@ -101,6 +101,10 @@ func Run(w *gioapp.Window, a *app.App) error {
 				if a.CurrentScreen == app.ScreenWizard {
 					wizardScreen.Reset()
 				}
+				// Clear stale signing state when navigating away from request details.
+				if lastScreen == app.ScreenRequestDetails && a.CurrentScreen != app.ScreenRequestDetails {
+					a.SignStatus = ""
+				}
 				lastScreen = a.CurrentScreen
 			}
 

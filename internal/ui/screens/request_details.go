@@ -342,6 +342,8 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if s.backButton.Clicked(gtx) {
+								s.App.SignStatus = ""
+								s.App.CurrentReq = nil
 								s.App.CurrentScreen = app.ScreenOpenRequest
 							}
 							btn := widgets.SecondaryButton(s.Theme, &s.backButton, "Back")

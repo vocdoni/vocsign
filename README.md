@@ -331,7 +331,9 @@ When a signature is submitted to `/api/callback/:requestId`, the API performs:
    - **Long-Term Validation (LTV)**: if a certificate was revoked *after* `signedAt`, the signature is still valid (eIDAS Article 32). Only certificates revoked before signing are rejected.
    - **Hard-fail**: if neither OCSP nor CRL can confirm non-revocation, the signature is rejected.
    - All outbound OCSP/CRL fetches use an SSRF-safe HTTP client (blocks private IPs, enforces size limits and timeouts).
-   - Bypass: set `ALLOW_TEST_CERTS=true` to skip chain/revocation checks (development only).
+   - Bypass modes:
+     - `ALLOW_TEST_CERTS=true` — skip all certificate checks (unit tests).
+     - `ALLOW_TEST_CERTS=verify` — run issuer + chain checks against the test CA, skip only revocation (near-production testing).
 7. **Identity cross-check**: certificate subject DN must match the identity in the submitted XML.
 8. **Duplicate prevention**: one signature per signer (identified by DNI/NIE/CIF) per proposal.
 9. **Storage**: saves via MongoDB transaction, increments the proposal's signature counter.
@@ -381,7 +383,10 @@ Root and intermediate certificates are bundled in `webapp/apps/api/src/ca-certs/
 
 In addition to chain verification, the server performs OCSP/CRL revocation checking with Long-Term Validation (LTV) and hard-fail policy.
 
-Set `ALLOW_TEST_CERTS=true` on the API to bypass chain verification, revocation checking, and issuer validation during development.
+Set `ALLOW_TEST_CERTS` on the API to control certificate validation during development:
+
+- `true` — bypass all checks (issuer, chain, revocation). Use for unit tests with arbitrary certs.
+- `verify` — load the test CA (`test/certs/ec-ciutadania-test-ca.pem`) into the trust store, run issuer allowlist and chain verification, skip only revocation. Use with `test/certs/idcat_full_nopass.p12` to exercise the near-production signing flow.
 
 ### Identity extraction
 
@@ -415,7 +420,7 @@ Certificates from the above CAs are parsed to extract:
 | `POLICY_OID` | _(optional)_ | Signature policy OID to embed in manifests |
 | `POLICY_URI` | _(optional)_ | Signature policy URI |
 | `DEFAULT_PROPOSAL_VALIDITY_DAYS` | `365` | How long proposals remain valid |
-| `ALLOW_TEST_CERTS` | `false` | Skip CA issuer validation (development only) |
+| `ALLOW_TEST_CERTS` | _(unset)_ | `true` = skip all cert checks; `verify` = issuer + chain only (skip revocation) |
 | `VOCSIGN_RELEASE_BASE_URL` | _(optional)_ | GitHub releases URL for desktop download links |
 
 ---
@@ -514,8 +519,13 @@ Generate test certificates if they don't exist, then run:
 
 ```bash
 cd test && bash gen_certs.sh && cd ..
+GENERATE_TEST_CERTS=1 go test ./test/ -run TestGenerateIDCatCertWithAllFields -v  # regenerate IDCat-like certs
 go test ./test/ -run 'TestEndToEndWithGeneratedCert|TestLegalComplianceXML'
 ```
+
+The IDCat cert generator (`TestGenerateIDCatCertWithAllFields`) produces:
+- `test/certs/idcat_full_nopass.p12` — user cert matching real EC-Ciutadania DN structure (serialNumber + GN + SN + CN).
+- `test/certs/ec-ciutadania-test-ca.pem` — test root CA, auto-loaded into the trust store when `ALLOW_TEST_CERTS` is set.
 
 Covers: PKCS#12 import → CAdES signature creation and verification → ILP XML generation with signer data.
 

@@ -319,13 +319,22 @@ app.post('/api/hash-document', docHashLimiter, async (req, res) => {
 
     const upstream = await fetch(url, {
       signal: controller.signal,
-      headers: { 'Accept': '*/*' },
+      headers: { 'Accept': '*/*', 'User-Agent': 'VocSign/1.0' },
       redirect: 'follow'
     });
     clearTimeout(timeout);
 
     if (!upstream.ok) {
       return res.status(502).json({ error: `Document fetch failed: HTTP ${upstream.status}` });
+    }
+
+    const ct = (upstream.headers.get('content-type') ?? '').toLowerCase();
+    if (ct.includes('text/html') || ct.includes('text/xml')) {
+      return res.status(422).json({
+        error:
+          'The URL returned an HTML/XML page instead of a document file. ' +
+          'Make sure the URL points directly to the file, not to a web page that displays it.'
+      });
     }
 
     const contentLength = Number(upstream.headers.get('content-length') ?? 0);
@@ -658,8 +667,11 @@ async function bootstrap(): Promise<void> {
   if (organizerApiKey === '') {
     console.warn('WARNING: ORGANIZER_API_KEY is not set — proposal creation endpoint is unauthenticated');
   }
-  if (process.env.ALLOW_TEST_CERTS === 'true') {
-    console.warn('WARNING: ALLOW_TEST_CERTS is enabled — certificate chain and revocation checks are DISABLED');
+  const testCertsMode = process.env.ALLOW_TEST_CERTS;
+  if (testCertsMode === 'true') {
+    console.warn('WARNING: ALLOW_TEST_CERTS=true — all certificate checks are DISABLED');
+  } else if (testCertsMode === 'verify') {
+    console.warn('WARNING: ALLOW_TEST_CERTS=verify — revocation checks are disabled, issuer + chain checks active');
   }
   app.listen(port, () => {
     console.log(`Vocsign portal listening on http://0.0.0.0:${port}`);

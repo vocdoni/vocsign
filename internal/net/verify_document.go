@@ -25,6 +25,12 @@ func VerifyDocumentHash(ctx context.Context, docURL string, expectedHashBase64 s
 	if err != nil {
 		return fmt.Errorf("failed to create request for document: %w", err)
 	}
+	// Match the headers sent by the webapp's hash-document endpoint so that
+	// the document server returns identical content to both clients.  Without
+	// this, CDNs may flag the default Go-http-client User-Agent as a bot and
+	// serve a challenge page instead of the document, causing a hash mismatch.
+	req.Header.Set("Accept", "*/*")
+	req.Header.Set("User-Agent", "VocSign/1.0")
 
 	client := newClient(30 * time.Second)
 	resp, err := client.Do(req)
@@ -46,9 +52,10 @@ func VerifyDocumentHash(ctx context.Context, docURL string, expectedHashBase64 s
 	actualHashBase64 := base64.StdEncoding.EncodeToString(actualHash[:])
 
 	if actualHashBase64 != expectedHashBase64 {
+		ct := resp.Header.Get("Content-Type")
 		return fmt.Errorf(
-			"document hash mismatch: expected %s but got %s",
-			expectedHashBase64, actualHashBase64,
+			"document hash mismatch: expected %s but got %s (content-type: %s, size: %d bytes)",
+			expectedHashBase64, actualHashBase64, ct, len(body),
 		)
 	}
 
