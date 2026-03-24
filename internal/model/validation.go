@@ -16,13 +16,16 @@ func (r *SignRequest) Validate() error {
 		return errors.New("missing requestId")
 	}
 
-	_, err := time.Parse(time.RFC3339, r.IssuedAt)
+	issuedAt, err := time.Parse(time.RFC3339, r.IssuedAt)
 	if err != nil {
 		return fmt.Errorf("invalid issuedAt: %w", err)
 	}
 	expiresAt, err := time.Parse(time.RFC3339, r.ExpiresAt)
 	if err != nil {
 		return fmt.Errorf("invalid expiresAt: %w", err)
+	}
+	if !issuedAt.Before(expiresAt) {
+		return errors.New("issuedAt must be before expiresAt")
 	}
 	if expiresAt.Before(time.Now()) {
 		return errors.New("request expired")
@@ -85,5 +88,40 @@ func (r *SignRequest) Validate() error {
 		return errors.New("missing organizerSignature value")
 	}
 
+	return nil
+}
+
+// ValidateBirthDate checks that s is a valid YYYY-MM-DD birth date.
+// It rejects the default placeholder "1980-01-01", future dates,
+// dates implying age < 16 or > 120, and invalid calendar dates.
+func ValidateBirthDate(s string) error {
+	if s == "" {
+		return fmt.Errorf("birth date is empty")
+	}
+	if s == "1980-01-01" {
+		return fmt.Errorf("birth date is the default placeholder, please enter your real date of birth")
+	}
+	d, err := time.Parse("2006-01-02", s)
+	if err != nil {
+		return fmt.Errorf("invalid date format, expected YYYY-MM-DD")
+	}
+	// Verify the parsed date matches the input (catches Feb 30 → Mar 2, etc.)
+	if d.Format("2006-01-02") != s {
+		return fmt.Errorf("invalid date: %s", s)
+	}
+	now := time.Now()
+	if d.After(now) {
+		return fmt.Errorf("birth date is in the future")
+	}
+	age := now.Year() - d.Year()
+	if now.Month() < d.Month() || (now.Month() == d.Month() && now.Day() < d.Day()) {
+		age--
+	}
+	if age < 16 {
+		return fmt.Errorf("signer must be at least 16 years old (too young)")
+	}
+	if age > 120 {
+		return fmt.Errorf("birth date implies age over 120 (too old)")
+	}
 	return nil
 }

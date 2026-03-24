@@ -5,10 +5,10 @@ import (
 )
 
 type ILPSignerXML struct {
-	XMLName       xml.Name `xml:"SignaturaILP"`
-	Versio        string   `xml:"versio,attr"`
-	ILP           ILPInfo  `xml:"ILP"`
-	Signant       Signant  `xml:"Signant"`
+	XMLName xml.Name `xml:"SignaturaILP"`
+	Versio  string   `xml:"versio,attr"`
+	ILP     ILPInfo  `xml:"ILP"`
+	Signant Signant  `xml:"Signant"`
 }
 
 type ILPInfo struct {
@@ -20,8 +20,8 @@ type Signant struct {
 	Nom             string `xml:"Nom"`
 	Cognom1         string `xml:"Cognom1"`
 	Cognom2         string `xml:"Cognom2"`
-	DataNaixement   string `xml:"DataNaixement"` // YYYY-MM-DD
-	TipusIdentifica string `xml:"TipusIdentificador"` // DNI
+	DataNaixement   string `xml:"DataNaixement"`      // YYYY-MM-DD
+	TipusIdentifica string `xml:"TipusIdentificador"` // DNI, NIE, or CIF
 	NumIdentifica   string `xml:"NumeroIdentificador"`
 }
 
@@ -34,11 +34,11 @@ func GenerateILPXML(req *SignRequest, data Signant) ([]byte, error) {
 		},
 		Signant: data,
 	}
-	
+
 	output, err := xml.MarshalIndent(obj, "", "  ")
 	if err != nil {
 		return nil, err
 	}
-	
+
 	return append([]byte(xml.Header), output...), nil
 }
