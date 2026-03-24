@@ -101,7 +101,7 @@ func (s *WizardScreen) Layout(gtx layout.Context) layout.Dimensions {
 	s.handleActions(gtx)
 
 	// Fill the entire background with the page bg color
-	paint.FillShape(gtx.Ops, s.Theme.Palette.Bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+	paint.FillShape(gtx.Ops, s.Theme.Bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		// Branded header bar — always visible across all wizard steps
@@ -339,7 +339,7 @@ func (s *WizardScreen) layoutChoiceHeading(gtx layout.Context) layout.Dimensions
 	return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Label(s.Theme, unit.Sp(28), "Add Your Certificates")
-			l.Color = s.Theme.Palette.Fg
+			l.Color = s.Theme.Fg
 			l.Font.Weight = font.Bold
 			l.Alignment = text.Middle
 			return l.Layout(gtx)
@@ -436,7 +436,7 @@ func (s *WizardScreen) modeCard(gtx layout.Context, cardWidthPx int, icon *widge
 								isz := gtx.Dp(unit.Dp(28))
 								gtx.Constraints.Min = image.Point{X: isz, Y: isz}
 								gtx.Constraints.Max = gtx.Constraints.Min
-								return icon.Layout(gtx, s.Theme.Palette.ContrastBg)
+								return icon.Layout(gtx, s.Theme.ContrastBg)
 							})
 						}),
 						layout.Rigid(layout.Spacer{Width: unit.Dp(14)}.Layout),
@@ -447,7 +447,7 @@ func (s *WizardScreen) modeCard(gtx layout.Context, cardWidthPx int, icon *widge
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 											l := material.Label(s.Theme, unit.Sp(18), title)
 											l.Font.Weight = font.Bold
-											l.Color = s.Theme.Palette.Fg
+											l.Color = s.Theme.Fg
 											return l.Layout(gtx)
 										}),
 										layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
@@ -455,7 +455,7 @@ func (s *WizardScreen) modeCard(gtx layout.Context, cardWidthPx int, icon *widge
 											if !recommended {
 												return layout.Dimensions{}
 											}
-											return widgets.Tag(gtx, s.Theme, "Recommended", s.Theme.Palette.ContrastBg)
+											return widgets.Tag(gtx, s.Theme, "Recommended", s.Theme.ContrastBg)
 										}),
 									)
 								}),
@@ -744,13 +744,13 @@ func (s *WizardScreen) layoutStepHeading(gtx layout.Context, icon *widget.Icon, 
 					sz := gtx.Dp(unit.Dp(32))
 					gtx.Constraints.Min = image.Point{X: sz, Y: sz}
 					gtx.Constraints.Max = gtx.Constraints.Min
-					return icon.Layout(gtx, s.Theme.Palette.ContrastBg)
+					return icon.Layout(gtx, s.Theme.ContrastBg)
 				}),
 				layout.Rigid(layout.Spacer{Width: unit.Dp(12)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					l := material.Label(s.Theme, unit.Sp(22), title)
 					l.Font.Weight = font.Bold
-					l.Color = s.Theme.Palette.Fg
+					l.Color = s.Theme.Fg
 					return l.Layout(gtx)
 				}),
 			)
@@ -796,55 +796,4 @@ func (s *WizardScreen) layoutFinish() {
 		s.Reset()
 		s.App.Invalidate()
 	}()
-}
-
-func centeredMax(gtx layout.Context, max unit.Dp, w layout.Widget) layout.Dimensions {
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		maxPx := gtx.Dp(max)
-		if gtx.Constraints.Max.X > maxPx {
-			gtx.Constraints.Max.X = maxPx
-		}
-		if gtx.Constraints.Min.X > gtx.Constraints.Max.X {
-			gtx.Constraints.Min.X = gtx.Constraints.Max.X
-		}
-		return w(gtx)
-	})
-}
-
-func exactWidthPx(gtx layout.Context, widthPx int, w layout.Widget) layout.Dimensions {
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		wpx := widthPx
-		if wpx > gtx.Constraints.Max.X {
-			wpx = gtx.Constraints.Max.X
-		}
-		if wpx < 0 {
-			wpx = 0
-		}
-		gtx.Constraints.Min.X = wpx
-		gtx.Constraints.Max.X = wpx
-		return w(gtx)
-	})
-}
-
-func centeredLabel(gtx layout.Context, th *material.Theme, size unit.Sp, textValue string) layout.Dimensions {
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		l := material.Label(th, size, textValue)
-		l.Alignment = text.Middle
-		return l.Layout(gtx)
-	})
-}
-
-func centeredCaption(gtx layout.Context, th *material.Theme, textValue string) layout.Dimensions {
-	return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-		l := material.Caption(th, textValue)
-		l.Alignment = text.Middle
-		return l.Layout(gtx)
-	})
-}
-
-func minInt(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
 }

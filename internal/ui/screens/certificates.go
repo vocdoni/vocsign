@@ -3,6 +3,7 @@ package screens
 import (
 	"context"
 	"image/color"
+	"log"
 	"strings"
 	"time"
 
@@ -69,7 +70,9 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 		s.pendingDeleteID = ""
 		go func() {
 			ctx := context.Background()
-			s.App.Store.Delete(ctx, targetID)
+			if err := s.App.Store.Delete(ctx, targetID); err != nil {
+				log.Printf("ERROR: failed to delete identity %s: %v", targetID, err)
+			}
 			ids, _ := s.App.Store.List(ctx)
 			s.App.SetIdentities(ids)
 			if s.selectedID == targetID {
@@ -107,7 +110,7 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return widgets.IconLabel(gtx, s.Theme, icons.IconCertificates, "Identity Wallet", s.Theme.Palette.ContrastBg, unit.Sp(24))
+					return widgets.IconLabel(gtx, s.Theme, icons.IconCertificates, "Identity Wallet", s.Theme.ContrastBg, unit.Sp(24))
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					btn := widgets.PrimaryButton(s.Theme, &s.WizardButton, "Import Certificate")
@@ -207,7 +210,7 @@ func (s *CertificatesScreen) Layout(gtx layout.Context) layout.Dimensions {
 										name = s.selectedID
 									}
 									l := material.H6(s.Theme, name)
-									l.Color = s.Theme.Palette.ContrastBg
+									l.Color = s.Theme.ContrastBg
 									return l.Layout(gtx)
 								}),
 								layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
@@ -373,7 +376,7 @@ func (s *CertificatesScreen) propertySection(gtx layout.Context, title string, p
 	return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			l := material.Caption(s.Theme, title)
-			l.Color = s.Theme.Palette.ContrastBg
+			l.Color = s.Theme.ContrastBg
 			l.Font.Weight = font.Bold
 			return l.Layout(gtx)
 		}),

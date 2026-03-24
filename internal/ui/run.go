@@ -68,7 +68,7 @@ func Run(w *gioapp.Window, a *app.App) error {
 		case gioapp.FrameEvent:
 			// log.Printf("DEBUG: FrameEvent received")
 			gtx := gioapp.NewContext(&ops, e)
-			paint.FillShape(gtx.Ops, th.Palette.Bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
+			paint.FillShape(gtx.Ops, th.Bg, clip.Rect{Max: gtx.Constraints.Max}.Op())
 
 			// Handle Navigation
 			if tabCert.Clicked(gtx) {
@@ -137,7 +137,7 @@ func Run(w *gioapp.Window, a *app.App) error {
 								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, func(gtx layout.Context) layout.Dimensions {
 									return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-											return widgets.IconLabel(gtx, th, icons.IconVocSign, "VocSign", th.Palette.ContrastBg, unit.Sp(20))
+											return widgets.IconLabel(gtx, th, icons.IconVocSign, "VocSign", th.ContrastBg, unit.Sp(20))
 										}),
 										layout.Rigid(layout.Spacer{Width: unit.Dp(24)}.Layout),
 										layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -168,17 +168,17 @@ func Run(w *gioapp.Window, a *app.App) error {
 						}
 						return widgets.VerticalDivider(gtx, color.NRGBA{R: 0xE5, G: 0xEB, B: 0xF5, A: 0xFF})
 					}),
-				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					if a.CurrentScreen == app.ScreenWizard {
-						gtx.Constraints.Min = gtx.Constraints.Max
-						return current(gtx)
-					}
-					return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-						return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
+					layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
+						if a.CurrentScreen == app.ScreenWizard {
+							gtx.Constraints.Min = gtx.Constraints.Max
+							return current(gtx)
+						}
+						return layout.UniformInset(unit.Dp(12)).Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+							return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
+								return widgets.ConstrainMaxWidth(gtx, widgets.DefaultPageMaxWidth, current)
+							})
 						})
-					})
-				}),
+					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						if a.CurrentScreen == app.ScreenWizard {
 							return layout.Dimensions{}
@@ -299,10 +299,10 @@ func footerVersionStatus(gtx layout.Context, th *material.Theme, a *app.App, upd
 
 func navTab(gtx layout.Context, th *material.Theme, click *widget.Clickable, icon *widget.Icon, label string, active bool) layout.Dimensions {
 	bg := color.NRGBA{A: 0}
-	fg := th.Palette.Fg
+	fg := th.Fg
 	if active {
-		bg = th.Palette.ContrastBg
-		fg = th.Palette.ContrastFg
+		bg = th.ContrastBg
+		fg = th.ContrastFg
 	}
 	return material.Clickable(gtx, click, func(gtx layout.Context) layout.Dimensions {
 		return widgets.CustomCard(gtx, bg, unit.Dp(8), func(gtx layout.Context) layout.Dimensions {
