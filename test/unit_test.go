@@ -5,11 +5,11 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/pem"
+	"net/url"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
-	"net/url"
-	"path/filepath"
 
 	"github.com/vocdoni/gofirma/vocsign/internal/canon"
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/cades"
@@ -39,7 +39,11 @@ func TestEndToEndWithGeneratedCert(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Open: %v", err)
 	}
-	defer p12File.Close()
+	defer func() {
+		if err := p12File.Close(); err != nil {
+			t.Logf("warning: failed to close p12 file: %v", err)
+		}
+	}()
 
 	identity, err := store.Import(ctx, "Test User", p12File, []byte("password"))
 	if err != nil {
@@ -50,7 +54,7 @@ func TestEndToEndWithGeneratedCert(t *testing.T) {
 	if identity.FriendlyName != "Test User" {
 		t.Errorf("FriendlyName mismatch: %s", identity.FriendlyName)
 	}
-	
+
 	// Try Fetch (Optional, if devcollector running)
 	// We mock the request instead to be self-contained
 	req := &model.SignRequest{
@@ -86,13 +90,13 @@ func TestEndToEndWithGeneratedCert(t *testing.T) {
 
 	u, _ := url.Parse(req.Callback.URL)
 	callbackHost := u.Host
-	
+
 	payload := model.SignPayload{
-		Version:      "1.0",
-		RequestID:    req.RequestID,
-		Nonce:        req.Nonce,
-		IssuedAt:     req.IssuedAt,
-		ExpiresAt:    req.ExpiresAt,
+		Version:   "1.0",
+		RequestID: req.RequestID,
+		Nonce:     req.Nonce,
+		IssuedAt:  req.IssuedAt,
+		ExpiresAt: req.ExpiresAt,
 		Proposal: model.PayloadProposal{
 			Title:          req.Proposal.Title,
 			Promoter:       req.Proposal.Promoter,
@@ -117,11 +121,11 @@ func TestEndToEndWithGeneratedCert(t *testing.T) {
 	}
 
 	t.Logf("Signature size: %d bytes", len(sig))
-	
+
 	// Optional: Submit (Mocked)
 	payloadHash := sha256.Sum256(payloadBytes)
 	certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: identity.Cert.Raw}))
-	
+
 	resp := &model.SignResponse{
 		Version:                "1.0",
 		RequestID:              req.RequestID,
@@ -137,7 +141,7 @@ func TestEndToEndWithGeneratedCert(t *testing.T) {
 			OS:      "linux",
 		},
 	}
-	
+
 	// Just print response
 	_ = resp
 }

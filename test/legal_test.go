@@ -3,14 +3,14 @@ package test
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
-	"path/filepath"
 
+	"github.com/smallstep/pkcs7"
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/cades"
 	"github.com/vocdoni/gofirma/vocsign/internal/crypto/pkcs12store"
 	"github.com/vocdoni/gofirma/vocsign/internal/model"
-	"github.com/smallstep/pkcs7"
 )
 
 func TestLegalComplianceXML(t *testing.T) {

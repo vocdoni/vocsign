@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/smallstep/pkcs7"
 	"github.com/vocdoni/gofirma/vocsign/internal/canon"
 	"github.com/vocdoni/gofirma/vocsign/internal/model"
-	"github.com/smallstep/pkcs7"
 )
 
 type ProposalState struct {
@@ -33,7 +33,7 @@ var (
 	organizerKey *rsa.PrivateKey
 	organizerPub *rsa.PublicKey
 	kid          = "vocsign-key-1"
-	
+
 	proposals = make(map[string]*ProposalState)
 	pMu       sync.Mutex
 
@@ -69,16 +69,16 @@ func main() {
 }
 
 func initProposals() {
-	addProposal("ILP-2026-HABITATGE", "PROPOSICIÓ DE LLEI DE MESURES URGENTS PER A L'HABITATGE DIGNE", 
-		"Comissió Promotora de la ILP per l'Habitatge Digne", 
+	addProposal("ILP-2026-HABITATGE", "PROPOSICIÓ DE LLEI DE MESURES URGENTS PER A L'HABITATGE DIGNE",
+		"Comissió Promotora de la ILP per l'Habitatge Digne",
 		"Aquesta iniciativa proposa regular els preus del lloguer, augmentar el parc d'habitatge social i garantir el dret a un sostre digne.")
-	
-	addProposal("ILP-2026-EDUCACIO", "LLEI DE FINANÇAMENT DEL SISTEMA EDUCATIU PÚBLIC (6%)", 
-		"Plataforma per una Educació Pública de Qualitat", 
+
+	addProposal("ILP-2026-EDUCACIO", "LLEI DE FINANÇAMENT DEL SISTEMA EDUCATIU PÚBLIC (6%)",
+		"Plataforma per una Educació Pública de Qualitat",
 		"Garantir per llei un mínim del 6% del PIB per a l'educació pública a Catalunya per revertir les retallades i millorar ràtios.")
-	
-	addProposal("ILP-2026-CLIMA", "PROPOSICIÓ DE LLEI DE PROTECCIÓ DELS ESPAIS NATURALS LITORALS", 
-		"SOS Costa Catalana", 
+
+	addProposal("ILP-2026-CLIMA", "PROPOSICIÓ DE LLEI DE PROTECCIÓ DELS ESPAIS NATURALS LITORALS",
+		"SOS Costa Catalana",
 		"Protecció efectiva dels darrers espais verds a la costa, moratòria de noves urbanitzacions i plans de restauració d'ecosistemes.")
 }
 
@@ -95,10 +95,10 @@ func addProposal(id, title, promoter, summary string) {
 		ExpiresAt: time.Now().Add(365 * 24 * time.Hour).Format(time.RFC3339),
 		Nonce:     base64.StdEncoding.EncodeToString([]byte(uuid.New().String())),
 		Proposal: model.Proposal{
-			Title:        title,
-			Promoter:     promoter,
-			Jurisdiction: "Catalunya",
-			Summary:      summary,
+			Title:          title,
+			Promoter:       promoter,
+			Jurisdiction:   "Catalunya",
+			Summary:        summary,
 			LegalStatement: "Mitjançant la meva signatura electrònica, dono el meu suport a la present Proposició de Llei, d'acord amb el que estableix la Llei 1/2006, de 16 de febrer.",
 			FullText: model.FullText{
 				URL:    "https://vocdoni.io/docs/ilp-example.pdf",
@@ -132,7 +132,7 @@ func addProposal(id, title, promoter, summary string) {
 	payloadB64 := base64.RawURLEncoding.EncodeToString(canonicalBytes)
 	hashed := sha256.Sum256([]byte(headerB64 + "." + payloadB64))
 	sig, _ := rsa.SignPKCS1v15(rand.Reader, organizerKey, crypto.SHA256, hashed[:])
-	
+
 	req.OrganizerSignature = &model.OrganizerSignature{
 		Format: "JWS",
 		Value:  headerB64 + "." + payloadB64 + "." + base64.RawURLEncoding.EncodeToString(sig),
@@ -199,10 +199,12 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
     </div>
 </body>
 </html>`
-	
+
 	pMu.Lock()
 	props := make([]*ProposalState, 0, len(proposals))
-	for _, p := range proposals { props = append(props, p) }
+	for _, p := range proposals {
+		props = append(props, p)
+	}
 	pMu.Unlock()
 
 	baseURL := domain
@@ -219,7 +221,10 @@ func handleDashboard(w http.ResponseWriter, r *http.Request) {
 	}
 
 	t := template.Must(template.New("dashboard").Parse(tpl))
-	t.Execute(w, data)
+	if err := t.Execute(w, data); err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
 }
 
 func handleGetRequest(w http.ResponseWriter, r *http.Request) {
@@ -230,7 +235,9 @@ func handleGetRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(p.Request)
+	if err := json.NewEncoder(w).Encode(p.Request); err != nil {
+		log.Printf("ERROR: failed to encode request: %v", err)
+	}
 }
 
 func handleCallback(w http.ResponseWriter, r *http.Request) {
@@ -250,7 +257,7 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 	sigBytes, _ := base64.StdEncoding.DecodeString(resp.SignatureDerBase64)
 	p7, _ := pkcs7.Parse(sigBytes)
 	xmlBytes, _ := base64.StdEncoding.DecodeString(resp.SignerXMLBase64)
-	
+
 	p7.Content = xmlBytes
 	if err := p7.Verify(); err != nil {
 		log.Printf("ERROR: Signature verification failed for %s: %v", id, err)
@@ -263,29 +270,35 @@ func handleCallback(w http.ResponseWriter, r *http.Request) {
 	p.Audit = append(p.Audit, resp)
 	p.mu.Unlock()
 
-	json.NewEncoder(w).Encode(model.SubmitReceipt{
+	if err := json.NewEncoder(w).Encode(model.SubmitReceipt{
 		Status:     "ok",
 		ReceiptID:  uuid.New().String(),
 		ReceivedAt: time.Now().Format(time.RFC3339),
-	})
+	}); err != nil {
+		log.Printf("ERROR: failed to encode receipt: %v", err)
+	}
 }
 
 func handleJWKS(w http.ResponseWriter, r *http.Request) {
 	nBytes := organizerPub.N.Bytes()
-	eBytes := make([]byte, 4) 
+	eBytes := make([]byte, 4)
 	eBytes[0] = byte(organizerPub.E >> 24)
 	eBytes[1] = byte(organizerPub.E >> 16)
 	eBytes[2] = byte(organizerPub.E >> 8)
 	eBytes[3] = byte(organizerPub.E)
-	for len(eBytes) > 1 && eBytes[0] == 0 { eBytes = eBytes[1:] }
+	for len(eBytes) > 1 && eBytes[0] == 0 {
+		eBytes = eBytes[1:]
+	}
 
-	jwks := map[string]interface{}{
-		"keys": []interface{}{map[string]string{
+	jwks := map[string]any{
+		"keys": []any{map[string]string{
 			"kty": "RSA", "use": "sig", "kid": kid, "alg": "RS256",
 			"n": base64.RawURLEncoding.EncodeToString(nBytes),
 			"e": base64.RawURLEncoding.EncodeToString(eBytes),
 		}},
 	}
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(jwks)
+	if err := json.NewEncoder(w).Encode(jwks); err != nil {
+		log.Printf("ERROR: failed to encode JWKS: %v", err)
+	}
 }

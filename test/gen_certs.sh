@@ -2,7 +2,8 @@
 set -e
 
 # Directories
-OUT_DIR="vocsign/test/certs"
+SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
+OUT_DIR="$SCRIPT_DIR/certs"
 mkdir -p $OUT_DIR
 
 # 1. Create Root CA (Fake idCAT/FNMT)
