@@ -110,7 +110,7 @@ func (s *AboutScreen) layoutHeroIcon(gtx layout.Context) layout.Dimensions {
 			isz := gtx.Dp(unit.Dp(44))
 			gtx.Constraints.Min = image.Point{X: isz, Y: isz}
 			gtx.Constraints.Max = gtx.Constraints.Min
-			return icons.IconVocSign.Layout(gtx, s.Theme.Palette.ContrastBg)
+			return icons.IconVocSign.Layout(gtx, s.Theme.ContrastBg)
 		})
 	})
 }
@@ -121,7 +121,7 @@ func (s *AboutScreen) layoutTitle(gtx layout.Context, version string) layout.Dim
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				l := material.Label(s.Theme, unit.Sp(30), "VocSign")
 				l.Font.Weight = font.Bold
-				l.Color = s.Theme.Palette.Fg
+				l.Color = s.Theme.Fg
 				return l.Layout(gtx)
 			}),
 			layout.Rigid(layout.Spacer{Width: unit.Dp(10)}.Layout),
@@ -129,10 +129,10 @@ func (s *AboutScreen) layoutTitle(gtx layout.Context, version string) layout.Dim
 				if version == "" {
 					return layout.Dimensions{}
 				}
-				return widgets.Border(gtx, s.Theme.Palette.ContrastBg, func(gtx layout.Context) layout.Dimensions {
+				return widgets.Border(gtx, s.Theme.ContrastBg, func(gtx layout.Context) layout.Dimensions {
 					return widgets.CustomCard(gtx, color.NRGBA{R: 0xEE, G: 0xF3, B: 0xFF, A: 0xFF}, unit.Dp(6), func(gtx layout.Context) layout.Dimensions {
 						l := material.Label(s.Theme, unit.Sp(12), "v"+version)
-						l.Color = s.Theme.Palette.ContrastBg
+						l.Color = s.Theme.ContrastBg
 						l.Font.Weight = font.Medium
 						return l.Layout(gtx)
 					})
@@ -187,12 +187,12 @@ func (s *AboutScreen) linkButton(gtx layout.Context, click *widget.Clickable, ic
 						sz := gtx.Dp(unit.Dp(16))
 						gtx.Constraints.Min = image.Point{X: sz, Y: sz}
 						gtx.Constraints.Max = gtx.Constraints.Min
-						return icon.Layout(gtx, s.Theme.Palette.ContrastBg)
+						return icon.Layout(gtx, s.Theme.ContrastBg)
 					}),
 					layout.Rigid(layout.Spacer{Width: unit.Dp(6)}.Layout),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						l := material.Label(s.Theme, unit.Sp(13), label)
-						l.Color = s.Theme.Palette.ContrastBg
+						l.Color = s.Theme.ContrastBg
 						l.Font.Weight = font.Medium
 						return l.Layout(gtx)
 					}),
@@ -217,7 +217,7 @@ func (s *AboutScreen) layoutInfoCard(gtx layout.Context) layout.Dimensions {
 							isz := gtx.Dp(unit.Dp(20))
 							gtx.Constraints.Min = image.Point{X: isz, Y: isz}
 							gtx.Constraints.Max = gtx.Constraints.Min
-							return icons.IconAbout.Layout(gtx, s.Theme.Palette.ContrastBg)
+							return icons.IconAbout.Layout(gtx, s.Theme.ContrastBg)
 						})
 					})
 				}),
@@ -226,7 +226,7 @@ func (s *AboutScreen) layoutInfoCard(gtx layout.Context) layout.Dimensions {
 					return layout.Center.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
 						l := material.Label(s.Theme, unit.Sp(16), "What is Vocdoni?")
 						l.Font.Weight = font.Bold
-						l.Color = s.Theme.Palette.Fg
+						l.Color = s.Theme.Fg
 						l.Alignment = text.Middle
 						return l.Layout(gtx)
 					})

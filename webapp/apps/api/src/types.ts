@@ -49,6 +49,7 @@ export interface SignResponse {
   signerCertPem: string;
   chainPem?: string[];
   signerXmlBase64?: string;
+  timestampTokenBase64?: string;
   client?: {
     app: string;
     version: string;

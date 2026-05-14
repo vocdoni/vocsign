@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
-import { createProposal } from '../api';
+import { createProposal, hashDocument } from '../api';
 import type { CreateProposalInput } from '../types';
 
 function defaultExpiresAt(): string {
@@ -18,7 +18,8 @@ function formDefaults(): CreateProposalInput {
       jurisdiction: '',
       summary: '',
       legalStatement: '',
-      fullTextURL: ''
+      fullTextURL: '',
+      fullTextSHA256: ''
     }
   };
 }
@@ -27,7 +28,22 @@ export function CreateProposalPage(): JSX.Element {
   const navigate = useNavigate();
   const [form, setForm] = useState<CreateProposalInput>(formDefaults());
   const [submitting, setSubmitting] = useState(false);
+  const [hashing, setHashing] = useState(false);
   const [error, setError] = useState('');
+
+  async function computeHash(url: string): Promise<void> {
+    if (!url) return;
+    setHashing(true);
+    setError('');
+    try {
+      const { sha256 } = await hashDocument(url);
+      setForm((prev) => ({ ...prev, proposal: { ...prev.proposal, fullTextSHA256: sha256 } }));
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : 'Could not compute document hash');
+    } finally {
+      setHashing(false);
+    }
+  }
 
   async function handleSubmit(event: React.FormEvent<HTMLFormElement>): Promise<void> {
     event.preventDefault();
@@ -109,8 +125,32 @@ export function CreateProposalPage(): JSX.Element {
                 placeholder="https://example.org/proposals/housing-law.pdf"
                 value={form.proposal.fullTextURL}
                 onChange={(e) => setForm({ ...form, proposal: { ...form.proposal, fullTextURL: e.target.value } })}
+                onBlur={(e) => {
+                  if (e.target.value) {
+                    computeHash(e.target.value);
+                  }
+                }}
                 required
               />
+            </label>
+            <label>
+              Full text SHA-256 (base64)
+              <span className="input-with-btn">
+                <input
+                  placeholder={hashing ? 'Computing hash...' : 'Auto-computed from document URL'}
+                  value={form.proposal.fullTextSHA256}
+                  onChange={(e) => setForm({ ...form, proposal: { ...form.proposal, fullTextSHA256: e.target.value } })}
+                  required
+                />
+                <button
+                  type="button"
+                  className="btn btn-secondary btn-sm"
+                  disabled={hashing || !form.proposal.fullTextURL}
+                  onClick={() => computeHash(form.proposal.fullTextURL)}
+                >
+                  {hashing ? 'Computing...' : 'Calculate'}
+                </button>
+              </span>
             </label>
             <label className="full">
               Summary

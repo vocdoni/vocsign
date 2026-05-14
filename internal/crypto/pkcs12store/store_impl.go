@@ -9,8 +9,10 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
+	"log"
 	"os"
 	"path/filepath"
+	"strings"
 	"sync"
 
 	"github.com/google/uuid"
@@ -44,7 +46,7 @@ type IdentityMeta struct {
 }
 
 func NewFileStore(dir string, vaultPW []byte) (*FileStore, error) {
-	if err := os.MkdirAll(dir, 0700); err != nil {
+	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return nil, fmt.Errorf("failed to create store dir: %w", err)
 	}
 	return &FileStore{
@@ -134,7 +136,7 @@ func (s *FileStore) Import(ctx context.Context, name string, r io.Reader, passwo
 	}
 
 	keyPath := filepath.Join(s.dir, id+".key.enc")
-	if err := os.WriteFile(keyPath, encryptedKey, 0600); err != nil {
+	if err := os.WriteFile(keyPath, encryptedKey, 0o600); err != nil {
 		return nil, fmt.Errorf("failed to save encrypted key: %w", err)
 	}
 
@@ -153,13 +155,17 @@ func (s *FileStore) Import(ctx context.Context, name string, r io.Reader, passwo
 	}
 	metaBytes, err := json.Marshal(meta)
 	if err != nil {
-		os.Remove(keyPath)
+		if rerr := os.Remove(keyPath); rerr != nil {
+			log.Printf("warning: failed to clean up key file %s: %v", keyPath, rerr)
+		}
 		return nil, fmt.Errorf("failed to marshal metadata: %w", err)
 	}
 
 	metaPath := filepath.Join(s.dir, id+".json")
-	if err := os.WriteFile(metaPath, metaBytes, 0600); err != nil {
-		os.Remove(keyPath)
+	if err := os.WriteFile(metaPath, metaBytes, 0o600); err != nil {
+		if rerr := os.Remove(keyPath); rerr != nil {
+			log.Printf("warning: failed to clean up key file %s: %v", keyPath, rerr)
+		}
 		return nil, fmt.Errorf("failed to save metadata: %w", err)
 	}
 
@@ -210,7 +216,7 @@ func (s *FileStore) ImportSystem(ctx context.Context, id Identity, libPath, prof
 		return err
 	}
 
-	return os.WriteFile(filepath.Join(s.dir, metaID+".json"), metaBytes, 0600)
+	return os.WriteFile(filepath.Join(s.dir, metaID+".json"), metaBytes, 0o600)
 }
 
 func (s *FileStore) Delete(ctx context.Context, id string) error {
@@ -220,8 +226,16 @@ func (s *FileStore) Delete(ctx context.Context, id string) error {
 	metaPath := filepath.Join(s.dir, id+".json")
 	keyPath := filepath.Join(s.dir, id+".key.enc")
 
-	os.Remove(metaPath)
-	os.Remove(keyPath)
+	var errs []string
+	if err := os.Remove(metaPath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Sprintf("metadata: %v", err))
+	}
+	if err := os.Remove(keyPath); err != nil && !os.IsNotExist(err) {
+		errs = append(errs, fmt.Sprintf("key: %v", err))
+	}
+	if len(errs) > 0 {
+		return fmt.Errorf("failed to delete: %s", strings.Join(errs, "; "))
+	}
 	return nil
 }
 

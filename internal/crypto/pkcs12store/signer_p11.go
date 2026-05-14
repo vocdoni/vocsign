@@ -80,8 +80,12 @@ func (s *PKCS11Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpt
 		return nil, fmt.Errorf("failed to load PKCS#11 lib")
 	}
 
-	os.Setenv("NSS_CONFIG_DIR", "sql:"+s.ProfileDir)
-	_ = p.Finalize()
+	if err := os.Setenv("NSS_CONFIG_DIR", "sql:"+s.ProfileDir); err != nil {
+		return nil, fmt.Errorf("failed to set NSS_CONFIG_DIR: %w", err)
+	}
+	if err := p.Finalize(); err != nil {
+		log.Printf("warning: PKCS#11 pre-finalize: %v", err)
+	}
 
 	params := fmt.Sprintf("configdir='sql:%s' certPrefix='' keyPrefix='' secmod='secmod.db' flags=readOnly", s.ProfileDir)
 	pByte := append([]byte(params), 0)
@@ -90,22 +94,36 @@ func (s *PKCS11Signer) Sign(rand io.Reader, digest []byte, opts crypto.SignerOpt
 	if err := p.Initialize(pkcs11.InitializeWithReserved(pPtr)); err != nil {
 		_ = p.Initialize()
 	}
-	defer p.Finalize()
+	defer func() {
+		if err := p.Finalize(); err != nil {
+			log.Printf("warning: PKCS#11 finalize: %v", err)
+		}
+	}()
 
 	session, err := p.OpenSession(s.Slot, pkcs11.CKF_SERIAL_SESSION)
 	if err != nil {
 		return nil, err
 	}
-	defer p.CloseSession(session)
+	defer func() {
+		if err := p.CloseSession(session); err != nil {
+			log.Printf("warning: PKCS#11 close session: %v", err)
+		}
+	}()
 
-	_ = p.Login(session, pkcs11.CKU_USER, "")
+	if err := p.Login(session, pkcs11.CKU_USER, ""); err != nil {
+		log.Printf("DEBUG: PKCS#11 login (may be expected for NSS): %v", err)
+	}
 
-	p.FindObjectsInit(session, []*pkcs11.Attribute{
+	if err := p.FindObjectsInit(session, []*pkcs11.Attribute{
 		pkcs11.NewAttribute(pkcs11.CKA_CLASS, pkcs11.CKO_PRIVATE_KEY),
 		pkcs11.NewAttribute(pkcs11.CKA_ID, s.ID),
-	})
+	}); err != nil {
+		return nil, fmt.Errorf("FindObjectsInit failed: %w", err)
+	}
 	objs, _, err := p.FindObjects(session, 1)
-	p.FindObjectsFinal(session)
+	if err2 := p.FindObjectsFinal(session); err2 != nil && err == nil {
+		err = err2
+	}
 	if err != nil || len(objs) == 0 {
 		return nil, fmt.Errorf("private key not found in slot %d", s.Slot)
 	}

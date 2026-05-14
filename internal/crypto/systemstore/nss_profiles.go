@@ -4,6 +4,7 @@ package systemstore
 
 import (
 	"bufio"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -214,7 +215,11 @@ func parseFirefoxProfilesINI(iniPath string) ([]firefoxProfile, []firefoxInstall
 	if err != nil {
 		return nil, nil
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("warning: failed to close profiles.ini: %v", err)
+		}
+	}()
 
 	baseDir := filepath.Dir(iniPath)
 	profilesBySection := make(map[string]*firefoxProfile)
@@ -353,8 +358,8 @@ func findNSSLibFromFirefoxCompatibility() string {
 		lastPlatformDir := ""
 		for sc.Scan() {
 			line := strings.TrimSpace(sc.Text())
-			if strings.HasPrefix(line, "LastPlatformDir=") {
-				lastPlatformDir = strings.TrimSpace(strings.TrimPrefix(line, "LastPlatformDir="))
+			if val, ok := strings.CutPrefix(line, "LastPlatformDir="); ok {
+				lastPlatformDir = strings.TrimSpace(val)
 				break
 			}
 		}
@@ -378,4 +383,3 @@ func findNSSLibFromFirefoxCompatibility() string {
 	}
 	return ""
 }
-

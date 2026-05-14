@@ -3,6 +3,7 @@ package certs
 import (
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"testing"
 	"time"
 )
@@ -37,6 +38,9 @@ func TestExtractSpanishIdentity_PersonalIDCatStyle(t *testing.T) {
 	if info.DNI != "47824166J" {
 		t.Fatalf("unexpected DNI: %q", info.DNI)
 	}
+	if info.IDType != "DNI" {
+		t.Fatalf("expected IDType %q, got %q", "DNI", info.IDType)
+	}
 }
 
 func TestExtractSpanishIdentity_RepresentativeWithoutPersonalMarkers(t *testing.T) {
@@ -68,6 +72,9 @@ func TestExtractSpanishIdentity_RepresentativeWithoutPersonalMarkers(t *testing.
 	if info.DNI != "47824166J" {
 		t.Fatalf("unexpected DNI: %q", info.DNI)
 	}
+	if info.IDType != "DNI" {
+		t.Fatalf("expected IDType %q, got %q", "DNI", info.IDType)
+	}
 }
 
 func TestExtractSpanishIdentity_PersonalFNMTUsuarios(t *testing.T) {
@@ -90,4 +97,90 @@ func TestExtractSpanishIdentity_PersonalFNMTUsuarios(t *testing.T) {
 	if info.DNI != "47824166J" {
 		t.Fatalf("unexpected DNI: %q", info.DNI)
 	}
+	if info.IDType != "DNI" {
+		t.Fatalf("expected IDType %q, got %q", "DNI", info.IDType)
+	}
+}
+
+func TestExtractSpanishIdentity_NIE(t *testing.T) {
+	cert := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "GARCIA LOPEZ MARIA - NIE X1234567A",
+			Names: []pkix.AttributeTypeAndValue{
+				{Type: oidSerialNumber, Value: "IDCES-X1234567A"},
+				{Type: oidGivenName, Value: "MARIA"},
+				{Type: oidSurname, Value: "GARCIA LOPEZ"},
+			},
+		},
+		Issuer:   pkix.Name{CommonName: "AC FNMT Usuarios"},
+		NotAfter: time.Date(2027, 6, 15, 0, 0, 0, 0, time.UTC),
+	}
+
+	info := ExtractSpanishIdentity(cert)
+	if info.IsRepresentative {
+		t.Fatal("expected personal certificate, got representative")
+	}
+	if info.DNI != "X1234567A" {
+		t.Fatalf("unexpected DNI: %q", info.DNI)
+	}
+	if info.IDType != "NIE" {
+		t.Fatalf("expected IDType %q, got %q", "NIE", info.IDType)
+	}
+	if info.Nom != "MARIA" {
+		t.Fatalf("unexpected given name: %q", info.Nom)
+	}
+}
+
+func TestExtractSpanishIdentity_DateOfBirth(t *testing.T) {
+	sdaValue := buildTestSDA(t, "19900515")
+	cert := &x509.Certificate{
+		Subject: pkix.Name{
+			CommonName: "PAU ESCRICH GARCIA - DNI 47824166J",
+			Names: []pkix.AttributeTypeAndValue{
+				{Type: oidGivenName, Value: "PAU"},
+				{Type: oidSurname, Value: "ESCRICH GARCIA"},
+				{Type: oidSerialNumber, Value: "IDCES-47824166J"},
+			},
+		},
+		Issuer: pkix.Name{CommonName: "AC FNMT Usuarios"},
+		Extensions: []pkix.Extension{
+			{
+				Id:    asn1.ObjectIdentifier{2, 5, 29, 9},
+				Value: sdaValue,
+			},
+		},
+	}
+	info := ExtractSpanishIdentity(cert)
+	if info.BirthDate != "1990-05-15" {
+		t.Fatalf("expected BirthDate %q, got %q", "1990-05-15", info.BirthDate)
+	}
+}
+
+func buildTestSDA(t *testing.T, dateYYYYMMDD string) []byte {
+	t.Helper()
+	dobOID := asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 9, 1}
+	genTime := dateYYYYMMDD + "000000Z"
+	gtBytes, err := asn1.Marshal(asn1.RawValue{
+		Class: asn1.ClassUniversal, Tag: 24, Bytes: []byte(genTime),
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	setBytes, err := asn1.Marshal(asn1.RawValue{
+		Class: asn1.ClassUniversal, Tag: 17, IsCompound: true, Bytes: gtBytes,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	type attribute struct {
+		Type  asn1.ObjectIdentifier
+		Value asn1.RawValue
+	}
+	result, err := asn1.Marshal([]attribute{{
+		Type: dobOID, Value: asn1.RawValue{FullBytes: setBytes},
+	}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return result
 }

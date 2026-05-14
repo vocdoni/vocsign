@@ -57,7 +57,7 @@ func (s *AuditScreen) Layout(gtx layout.Context) layout.Dimensions {
 		layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 			return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 				layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-					return widgets.IconLabel(gtx, s.Theme, icons.IconAudit, "Signing History", s.Theme.Palette.ContrastBg, unit.Sp(24))
+					return widgets.IconLabel(gtx, s.Theme, icons.IconAudit, "Signing History", s.Theme.ContrastBg, unit.Sp(24))
 				}),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					btn := widgets.SecondaryButton(s.Theme, &s.Refresh, "Refresh")

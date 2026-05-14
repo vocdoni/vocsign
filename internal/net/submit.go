@@ -25,12 +25,12 @@ func Submit(ctx context.Context, callbackURL string, resp *model.SignResponse) (
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	client := &http.Client{Timeout: 30 * time.Second}
+	client := newClient(30 * time.Second)
 	httpResp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("submit failed: %w", err)
 	}
-	defer httpResp.Body.Close()
+	defer func() { _ = httpResp.Body.Close() }()
 
 	if httpResp.StatusCode != http.StatusOK && httpResp.StatusCode != http.StatusCreated {
 		body, _ := io.ReadAll(io.LimitReader(httpResp.Body, 4096))
@@ -40,8 +40,13 @@ func Submit(ctx context.Context, callbackURL string, resp *model.SignResponse) (
 		return nil, fmt.Errorf("unexpected status code: %d", httpResp.StatusCode)
 	}
 
+	body, err := readAll(httpResp.Body, maxResponseBytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read receipt body: %w", err)
+	}
+
 	var receipt model.SubmitReceipt
-	if err := json.NewDecoder(httpResp.Body).Decode(&receipt); err != nil {
+	if err := json.Unmarshal(body, &receipt); err != nil {
 		return nil, fmt.Errorf("failed to decode receipt: %w", err)
 	}
 

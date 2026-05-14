@@ -3,6 +3,7 @@ package systemstore
 import (
 	"context"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"runtime"
@@ -118,7 +119,7 @@ func p12ScanRoots(home string) []string {
 		filepath.Join(home, ".certificates"),
 		filepath.Join(home, "certs"),
 		filepath.Join(home, "certificates"),
-		filepath.Join(home, ".gnupg"),  // some tools store PKCS#12 here
+		filepath.Join(home, ".gnupg"), // some tools store PKCS#12 here
 
 		// XDG user dirs
 		xdgUserDir("XDG_DOCUMENTS_DIR", filepath.Join(home, "Documents")),
@@ -253,7 +254,11 @@ func ParsePKCS12Metadata(path, password string) (pkcs12store.Identity, error) {
 	if err != nil {
 		return pkcs12store.Identity{}, err
 	}
-	defer f.Close()
+	defer func() {
+		if err := f.Close(); err != nil {
+			log.Printf("warning: failed to close %s: %v", path, err)
+		}
+	}()
 
 	signer, cert, chain, err := pkcs12store.ParsePKCS12(f, password)
 	if err != nil {

@@ -23,6 +23,7 @@ const signatureSchema = new Schema(
     signedAt: { type: String, required: true },
     payloadCanonicalSha256: { type: String, required: true },
     signatureFormat: { type: String, required: true },
+    timestampTokenBase64: { type: String, default: '' },
     client: {
       app: { type: String, default: '' },
       version: { type: String, default: '' },

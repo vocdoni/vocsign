@@ -8,6 +8,8 @@ import (
 	"encoding/pem"
 	"fmt"
 	"image/color"
+	"log"
+	"os"
 	"runtime"
 	"strings"
 	"time"
@@ -44,6 +46,10 @@ type RequestDetailsScreen struct {
 	Cognom2Editor widget.Editor
 	DNIEditor     widget.Editor
 	BirthEditor   widget.Editor
+	ConsentCheck  widget.Bool
+
+	birthDateErr  string
+	lastBirthText string
 
 	DocLinkButton    widget.Clickable
 	PolicyLinkButton widget.Clickable
@@ -72,8 +78,13 @@ func NewRequestDetailsScreen(a *app.App, th *material.Theme) *RequestDetailsScre
 	s.PostSignList.Axis = layout.Vertical
 
 	s.IDEditor.ReadOnly = true
+	s.NomEditor.ReadOnly = true
+	s.Cognom1Editor.ReadOnly = true
+	s.Cognom2Editor.ReadOnly = true
+	s.DNIEditor.ReadOnly = true
 
 	s.BirthEditor.SetText("1980-01-01")
+	s.BirthEditor.SingleLine = true
 	return s
 }
 
@@ -121,8 +132,28 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 				s.Cognom2Editor.SetText("")
 			}
 			s.DNIEditor.SetText(s.selectedInfo.DNI)
+
+			// Auto-fill from certificate when available
+			if s.selectedInfo.BirthDate != "" {
+				s.BirthEditor.SetText(s.selectedInfo.BirthDate)
+				s.BirthEditor.ReadOnly = true
+				s.birthDateErr = ""
+			} else {
+				s.BirthEditor.SetText("1980-01-01")
+				s.BirthEditor.ReadOnly = false
+			}
 		} else {
 			s.selectedInfo = certs.ExtractedInfo{}
+		}
+	}
+
+	// Real-time birth date validation
+	if text := strings.TrimSpace(s.BirthEditor.Text()); text != s.lastBirthText {
+		s.lastBirthText = text
+		if err := model.ValidateBirthDate(text); err != nil {
+			s.birthDateErr = err.Error()
+		} else {
+			s.birthDateErr = ""
 		}
 	}
 
@@ -135,10 +166,15 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 				cognom1 := strings.TrimSpace(s.Cognom1Editor.Text())
 				cognom2 := strings.TrimSpace(s.Cognom2Editor.Text())
 				dni := strings.TrimSpace(s.DNIEditor.Text())
+				birthDate := strings.TrimSpace(s.BirthEditor.Text())
 				if dni == "" {
 					s.App.SignStatus = "Validation failed: signer ID/DNI is required"
 				} else if nom == "" && cognom1 == "" && cognom2 == "" {
 					s.App.SignStatus = "Validation failed: signer name is required"
+				} else if err := model.ValidateBirthDate(birthDate); err != nil {
+					s.App.SignStatus = "Validation failed: " + err.Error()
+				} else if !s.ConsentCheck.Value {
+					s.App.SignStatus = "You must confirm you have read and accept the data protection notice and consent to signing this initiative"
 				} else {
 					s.IsSigning = true
 					s.App.SignStatus = "Preparing legally compliant XML..."
@@ -150,102 +186,134 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 					isSystem := strings.HasPrefix(identityID, "nss:") || strings.HasPrefix(identityID, "os:")
 					identitySigner := identity.Signer
 
-					signerData := model.Signant{
-						Nom:             nom,
-						Cognom1:         cognom1,
-						Cognom2:         cognom2,
-						TipusIdentifica: "DNI",
-						NumIdentifica:   dni,
-						DataNaixement:   strings.TrimSpace(s.BirthEditor.Text()),
-					}
-
-					go func() {
-						ctx := context.Background()
-						defer func() { s.IsSigning = false }()
-
-						var signer crypto.Signer
-						var err error
-						if isSystem {
-							signer = identitySigner
-						} else {
-							signer, err = s.App.Store.Unlock(ctx, identityID)
+					if err := certs.ValidateForSigning(identityCert, identityChain); err != nil {
+						s.App.SignStatus = "Certificate validation failed: " + err.Error()
+						s.IsSigning = false
+					} else {
+						idType := s.selectedInfo.IDType
+						if idType == "" {
+							idType = "DNI"
+						}
+						signerData := model.Signant{
+							Nom:             nom,
+							Cognom1:         cognom1,
+							Cognom2:         cognom2,
+							TipusIdentifica: idType,
+							NumIdentifica:   dni,
+							DataNaixement:   strings.TrimSpace(s.BirthEditor.Text()),
 						}
 
-						if err != nil || signer == nil {
-							if err == nil {
-								err = fmt.Errorf("signer is nil")
+						go func() {
+							ctx := context.Background()
+							defer func() { s.IsSigning = false }()
+
+							s.App.SignStatus = "Verifying proposal document integrity..."
+							if err := net.VerifyDocumentHash(ctx, reqCopy.Proposal.FullText.URL, reqCopy.Proposal.FullText.SHA256); err != nil {
+								s.App.SignStatus = "Document verification failed: " + err.Error()
+								return
 							}
-							s.App.SignStatus = "Unlock failed: " + err.Error()
-							return
-						}
 
-						xmlBytes, err := model.GenerateILPXML(&reqCopy, signerData)
-						if err != nil {
-							s.App.SignStatus = "XML generation failed: " + err.Error()
-							return
-						}
+							var signer crypto.Signer
+							var err error
+							if isSystem {
+								signer = identitySigner
+							} else {
+								signer, err = s.App.Store.Unlock(ctx, identityID)
+							}
 
-						s.App.SignStatus = "Signing XML payload..."
-						signatureDER, err := cades.SignDetached(ctx, signer, identityCert, identityChain, xmlBytes, cades.SignOpts{
-							SigningTime: time.Now(),
-							Policy:      reqCopy.Policy,
-						})
-						if err != nil {
-							s.App.SignStatus = "Signing failed: " + err.Error()
-							return
-						}
+							if err != nil || signer == nil {
+								if err == nil {
+									err = fmt.Errorf("signer is nil")
+								}
+								s.App.SignStatus = "Unlock failed: " + err.Error()
+								return
+							}
 
-						payloadHash := sha256.Sum256(xmlBytes)
-						certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: identityCert.Raw}))
-						var chainPEM []string
-						for _, c := range identityChain {
-							chainPEM = append(chainPEM, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})))
-						}
+							xmlBytes, err := model.GenerateILPXML(&reqCopy, signerData)
+							if err != nil {
+								s.App.SignStatus = "XML generation failed: " + err.Error()
+								return
+							}
 
-						resp := &model.SignResponse{
-							Version:                "1.0",
-							RequestID:              reqCopy.RequestID,
-							Nonce:                  reqCopy.Nonce,
-							SignedAt:               time.Now().Format(time.RFC3339),
-							PayloadCanonicalSHA256: base64.StdEncoding.EncodeToString(payloadHash[:]),
-							SignatureFormat:        "CAdES-detached",
-							SignatureDerBase64:     base64.StdEncoding.EncodeToString(signatureDER),
-							SignerCertPEM:          certPEM,
-							ChainPEM:               chainPEM,
-							SignerXMLBase64:        base64.StdEncoding.EncodeToString(xmlBytes),
-							Client: model.ClientInfo{
-								App:     "vocsign",
-								Version: "0.1.0",
-								OS:      runtime.GOOS,
-							},
-						}
+							s.App.SignStatus = "Signing XML payload..."
+							signatureDER, err := cades.SignDetached(ctx, signer, identityCert, identityChain, xmlBytes, cades.SignOpts{
+								SigningTime: time.Now(),
+								Policy:      reqCopy.Policy,
+							})
+							if err != nil {
+								s.App.SignStatus = "Signing failed: " + err.Error()
+								return
+							}
 
-						s.App.SignStatus = "Submitting signature..."
-						receipt, err := net.Submit(ctx, reqCopy.Callback.URL, resp)
+							// Request trusted timestamp (CAdES-T) if TSA URL is configured.
+							var timestampTokenB64 string
+							if tsaURL := os.Getenv("VOCSIGN_TSA_URL"); tsaURL != "" {
+								s.App.SignStatus = "Requesting trusted timestamp..."
+								tsToken, tsErr := cades.RequestTimestamp(tsaURL, signatureDER)
+								if tsErr != nil {
+									log.Printf("WARNING: timestamp request failed: %v", tsErr)
+								} else {
+									timestampTokenB64 = base64.StdEncoding.EncodeToString(tsToken)
+								}
+							}
 
-						auditEntry := storage.AuditEntry{
-							RequestID:       reqCopy.RequestID,
-							ProposalTitle:   reqCopy.Proposal.Title,
-							SignerName:      signerData.Nom + " " + signerData.Cognom1 + " " + signerData.Cognom2,
-							SignerDNI:       signerData.NumIdentifica,
-							CallbackHost:    "server",
-							CertFingerprint: fmt.Sprintf("%x", pkcs12store.Fingerprint(identityCert)),
-						}
+							payloadHash := sha256.Sum256(xmlBytes)
+							certPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: identityCert.Raw}))
+							var chainPEM []string
+							for _, c := range identityChain {
+								chainPEM = append(chainPEM, string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: c.Raw})))
+							}
 
-						if err != nil {
-							s.App.SignStatus = "Submission failed: " + err.Error()
-							auditEntry.Status = "fail"
-							auditEntry.Error = err.Error()
-							s.App.AuditLogger.Log(auditEntry)
-							return
-						}
+							resp := &model.SignResponse{
+								Version:                "1.0",
+								RequestID:              reqCopy.RequestID,
+								Nonce:                  reqCopy.Nonce,
+								SignedAt:               time.Now().Format(time.RFC3339),
+								PayloadCanonicalSHA256: base64.StdEncoding.EncodeToString(payloadHash[:]),
+								SignatureFormat:        "CAdES-detached",
+								SignatureDerBase64:     base64.StdEncoding.EncodeToString(signatureDER),
+								SignerCertPEM:          certPEM,
+								ChainPEM:               chainPEM,
+								SignerXMLBase64:        base64.StdEncoding.EncodeToString(xmlBytes),
+								TimestampTokenBase64:   timestampTokenB64,
+								Client: model.ClientInfo{
+									App:     "vocsign",
+									Version: "0.1.0",
+									OS:      runtime.GOOS,
+								},
+							}
 
-						s.App.SignResponse = resp
-						auditEntry.Status = "success"
-						auditEntry.ServerAckID = receipt.ReceiptID
-						s.App.AuditLogger.Log(auditEntry)
-						s.App.Invalidate()
-					}()
+							s.App.SignStatus = "Submitting signature..."
+							receipt, err := net.Submit(ctx, reqCopy.Callback.URL, resp)
+
+							auditEntry := storage.AuditEntry{
+								RequestID:       reqCopy.RequestID,
+								ProposalTitle:   reqCopy.Proposal.Title,
+								SignerName:      signerData.Nom + " " + signerData.Cognom1 + " " + signerData.Cognom2,
+								SignerDNI:       signerData.NumIdentifica,
+								CallbackHost:    "server",
+								CertFingerprint: fmt.Sprintf("%x", pkcs12store.Fingerprint(identityCert)),
+							}
+
+							if err != nil {
+								s.App.SignStatus = "Submission failed: " + err.Error()
+								auditEntry.Status = "fail"
+								auditEntry.Error = err.Error()
+								if err := s.App.AuditLogger.Log(auditEntry); err != nil {
+									log.Printf("ERROR: failed to write audit log: %v", err)
+								}
+								return
+							}
+
+							s.App.SignResponse = resp
+							auditEntry.Status = "success"
+							auditEntry.ServerAckID = receipt.ReceiptID
+							if err := s.App.AuditLogger.Log(auditEntry); err != nil {
+								log.Printf("ERROR: failed to write audit log: %v", err)
+							}
+							s.App.Invalidate()
+						}()
+					}
 				}
 			}
 		}
@@ -270,10 +338,12 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 					return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
 						layout.Flexed(1, func(gtx layout.Context) layout.Dimensions {
-							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Sign Request", s.Theme.Palette.ContrastBg, unit.Sp(22))
+							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Sign Request", s.Theme.ContrastBg, unit.Sp(22))
 						}),
 						layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 							if s.backButton.Clicked(gtx) {
+								s.App.SignStatus = ""
+								s.App.CurrentReq = nil
 								s.App.CurrentScreen = app.ScreenOpenRequest
 							}
 							btn := widgets.SecondaryButton(s.Theme, &s.backButton, "Back")
@@ -288,7 +358,7 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 								l := material.H6(s.Theme, req.Proposal.Title)
-								l.Color = s.Theme.Palette.ContrastBg
+								l.Color = s.Theme.ContrastBg
 								return l.Layout(gtx)
 							}),
 							layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
@@ -326,7 +396,7 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 
 				layout.Rigid(layout.Spacer{Height: unit.Dp(20)}.Layout),
 				layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-					return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "Signature Workspace", s.Theme.Palette.Fg, unit.Sp(18))
+					return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "Signature Workspace", s.Theme.Fg, unit.Sp(18))
 				}),
 				layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 
@@ -403,10 +473,32 @@ func (s *RequestDetailsScreen) Layout(gtx layout.Context) layout.Dimensions {
 											}),
 											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
 											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-												return layout.Flex{Axis: layout.Horizontal, Alignment: layout.Middle}.Layout(gtx,
-													layout.Rigid(material.Body2(s.Theme, "Birth Date: ").Layout),
-													layout.Flexed(1, material.Editor(s.Theme, &s.BirthEditor, "YYYY-MM-DD").Layout),
+												return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														source := widgets.FieldManual
+														if s.selectedInfo.BirthDate != "" {
+															source = widgets.FieldFromCert
+														}
+														return widgets.FieldLabel(gtx, s.Theme, "Birth Date", source)
+													}),
+													layout.Rigid(layout.Spacer{Height: unit.Dp(2)}.Layout),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														return material.Editor(s.Theme, &s.BirthEditor, "YYYY-MM-DD").Layout(gtx)
+													}),
+													layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+														if s.birthDateErr == "" {
+															return layout.Dimensions{}
+														}
+														l := material.Caption(s.Theme, s.birthDateErr)
+														l.Color = widgets.ColorError
+														return l.Layout(gtx)
+													}),
 												)
+											}),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+											layout.Rigid(layout.Spacer{Height: unit.Dp(8)}.Layout),
+											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
+												return material.CheckBox(s.Theme, &s.ConsentCheck, "I confirm I have read the proposal, accept the data protection notice, and consent to supporting this legislative initiative").Layout(gtx)
 											}),
 											layout.Rigid(layout.Spacer{Height: unit.Dp(10)}.Layout),
 											layout.Rigid(func(gtx layout.Context) layout.Dimensions {
@@ -534,7 +626,7 @@ func (s *RequestDetailsScreen) layoutPostSign(gtx layout.Context) layout.Dimensi
 					return widgets.CustomCard(gtx, widgets.ColorSurface, unit.Dp(24), func(gtx layout.Context) layout.Dimensions {
 						return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {
-								return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "Official Receipt", s.Theme.Palette.ContrastBg, unit.Sp(14))
+								return widgets.IconLabel(gtx, s.Theme, icons.IconVocSign, "Official Receipt", s.Theme.ContrastBg, unit.Sp(14))
 							}),
 							layout.Rigid(layout.Spacer{Height: unit.Dp(16)}.Layout),
 							layout.Rigid(func(gtx layout.Context) layout.Dimensions {

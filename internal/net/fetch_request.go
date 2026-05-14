@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 	"log"
 	"net/http"
 	"time"
@@ -20,20 +19,20 @@ func Fetch(ctx context.Context, url string) (*model.SignRequest, []byte, error) 
 		return nil, nil, fmt.Errorf("failed to create request: %w", err)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
+	client := newClient(10 * time.Second)
 	resp, err := client.Do(req)
 	if err != nil {
 		log.Printf("DEBUG: Fetch failed: %v", err)
 		return nil, nil, fmt.Errorf("fetch failed: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 
 	log.Printf("DEBUG: HTTP Response Status: %s", resp.Status)
 	if resp.StatusCode != http.StatusOK {
 		return nil, nil, fmt.Errorf("unexpected status code: %d", resp.StatusCode)
 	}
 
-	raw, err := io.ReadAll(resp.Body)
+	raw, err := readAll(resp.Body, maxResponseBytes)
 	if err != nil {
 		return nil, nil, fmt.Errorf("failed to read response body: %w", err)
 	}

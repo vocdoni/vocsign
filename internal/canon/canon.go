@@ -8,14 +8,19 @@ import (
 
 // Encode returns the canonical JSON encoding of v.
 // It ensures:
-// - Lexicographically sorted keys (Go's default)
+// - Struct fields in Go declaration order (NOT alphabetical)
 // - No insignificant whitespace (Go's default for Marshal)
 // - No HTML escaping (SetEscapeHTML(false))
+//
+// IMPORTANT: The organizer (TypeScript portal) must produce JSON with the same
+// field ordering. Go's encoding/json outputs struct fields in declaration order,
+// while JSON.stringify outputs in insertion order. Both sides must construct
+// objects with fields in the same order for JWS verification to succeed.
 func Encode(v any) ([]byte, error) {
 	var buf bytes.Buffer
 	enc := json.NewEncoder(&buf)
 	enc.SetEscapeHTML(false)
-	
+
 	if err := enc.Encode(v); err != nil {
 		return nil, fmt.Errorf("canonical encoding failed: %w", err)
 	}

@@ -312,6 +312,23 @@ textarea {
   grid-column: 1 / -1;
 }
 
+.input-with-btn {
+  display: flex;
+  gap: 0.4rem;
+  align-items: stretch;
+}
+
+.input-with-btn input {
+  flex: 1;
+  min-width: 0;
+}
+
+.btn-sm {
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  white-space: nowrap;
+}
+
 .guide-card h3 {
   margin-top: 0;
 }

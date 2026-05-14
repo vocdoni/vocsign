@@ -35,7 +35,7 @@ func FetchLatestRelease(ctx context.Context) (string, string, error) {
 	if err != nil {
 		return "", "", fmt.Errorf("fetch latest release: %w", err)
 	}
-	defer resp.Body.Close()
+	defer func() { _ = resp.Body.Close() }()
 	log.Printf("DEBUG: FetchLatestRelease response status=%s", resp.Status)
 
 	if resp.StatusCode != http.StatusOK {

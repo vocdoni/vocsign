@@ -92,8 +92,8 @@ func Tag(gtx layout.Context, th *material.Theme, text string, fg color.NRGBA) la
 
 func PrimaryButton(th *material.Theme, c *widget.Clickable, text string) material.ButtonStyle {
 	btn := material.Button(th, c, text)
-	btn.Background = th.Palette.ContrastBg
-	btn.Color = th.Palette.ContrastFg
+	btn.Background = th.ContrastBg
+	btn.Color = th.ContrastFg
 	btn.TextSize = unit.Sp(14)
 	return btn
 }
@@ -101,7 +101,7 @@ func PrimaryButton(th *material.Theme, c *widget.Clickable, text string) materia
 func SecondaryButton(th *material.Theme, c *widget.Clickable, text string) material.ButtonStyle {
 	btn := material.Button(th, c, text)
 	btn.Background = color.NRGBA{R: 0xE8, G: 0xED, B: 0xF5, A: 0xFF}
-	btn.Color = th.Palette.Fg
+	btn.Color = th.Fg
 	btn.TextSize = unit.Sp(14)
 	return btn
 }
@@ -119,7 +119,7 @@ func EmptyState(gtx layout.Context, th *material.Theme, title, subtitle string) 
 		return layout.Flex{Axis: layout.Vertical, Alignment: layout.Middle}.Layout(gtx,
 			layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 				l := material.Body1(th, title)
-				l.Color = th.Palette.Fg
+				l.Color = th.Fg
 				l.Font.Weight = font.Bold
 				return l.Layout(gtx)
 			}),

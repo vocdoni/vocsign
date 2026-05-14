@@ -122,7 +122,7 @@ func (s *OpenRequestScreen) Layout(gtx layout.Context) layout.Dimensions {
 				return layout.Flex{Axis: layout.Vertical}.Layout(gtx,
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {
 						return layout.Inset{Bottom: unit.Dp(12)}.Layout(gtx, func(gtx layout.Context) layout.Dimensions {
-							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Open Signing Request", s.Theme.Palette.ContrastBg, unit.Sp(24))
+							return widgets.IconLabel(gtx, s.Theme, icons.IconOpenRequest, "Open Signing Request", s.Theme.ContrastBg, unit.Sp(24))
 						})
 					}),
 					layout.Rigid(func(gtx layout.Context) layout.Dimensions {

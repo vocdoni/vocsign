@@ -14,6 +14,9 @@ var (
 	oidOrganization           = asn1.ObjectIdentifier{2, 5, 4, 10}
 	oidDescription            = asn1.ObjectIdentifier{2, 5, 4, 13}
 	oidOrganizationIdentifier = asn1.ObjectIdentifier{2, 5, 4, 97}
+
+	oidSubjectDirectoryAttributes = asn1.ObjectIdentifier{2, 5, 29, 9}
+	oidDateOfBirth                = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 9, 1}
 )
 
 var (
@@ -30,12 +33,14 @@ type ExtractedInfo struct {
 	Nom              string
 	Cognoms          []string
 	DNI              string
+	IDType           string
 	Organization     string
 	OrganizationID   string
 	IsRepresentative bool
 	RawSubject       string
 	Issuer           string
 	ValidUntil       string
+	BirthDate        string // YYYY-MM-DD, from Subject Directory Attributes if present
 }
 
 func ExtractSpanishIdentity(cert *x509.Certificate) ExtractedInfo {
@@ -66,8 +71,9 @@ func ExtractSpanishIdentity(cert *x509.Certificate) ExtractedInfo {
 				hasPersonalAttrs = true
 			}
 		} else if name.Type.Equal(oidSerialNumber) {
-			if id := extractID(val); id != "" {
+			if id, idType := extractID(val); id != "" {
 				info.DNI = id
+				info.IDType = idType
 				if isPersonalID(id) {
 					hasPersonalAttrs = true
 				}
@@ -92,7 +98,9 @@ func ExtractSpanishIdentity(cert *x509.Certificate) ExtractedInfo {
 		info.OrganizationID = extractRepresentativeID(cn)
 	}
 	if info.DNI == "" {
-		info.DNI = extractID(cn)
+		id, idType := extractID(cn)
+		info.DNI = id
+		info.IDType = idType
 	}
 	if info.Nom == "" || len(info.Cognoms) == 0 {
 		namePart := cn
@@ -128,10 +136,51 @@ func ExtractSpanishIdentity(cert *x509.Certificate) ExtractedInfo {
 		info.OrganizationID = ""
 	}
 
+	info.BirthDate = extractDateOfBirth(cert)
+
 	return info
 }
 
-func extractID(s string) string {
+// extractDateOfBirth parses the dateOfBirth from the Subject Directory
+// Attributes extension (OID 2.5.29.9) if present. Returns "" if not found.
+func extractDateOfBirth(cert *x509.Certificate) string {
+	for _, ext := range cert.Extensions {
+		if !ext.Id.Equal(oidSubjectDirectoryAttributes) {
+			continue
+		}
+		var attrs []asn1.RawValue
+		rest, err := asn1.Unmarshal(ext.Value, &attrs)
+		if err != nil || len(rest) > 0 {
+			return ""
+		}
+		for _, rawAttr := range attrs {
+			var attrSeq asn1.RawValue
+			if _, err := asn1.Unmarshal(rawAttr.FullBytes, &attrSeq); err != nil {
+				continue
+			}
+			var oid asn1.ObjectIdentifier
+			rest, err := asn1.Unmarshal(attrSeq.Bytes, &oid)
+			if err != nil || !oid.Equal(oidDateOfBirth) {
+				continue
+			}
+			var setValue asn1.RawValue
+			if _, err := asn1.Unmarshal(rest, &setValue); err != nil {
+				continue
+			}
+			var gt asn1.RawValue
+			if _, err := asn1.Unmarshal(setValue.Bytes, &gt); err != nil {
+				continue
+			}
+			s := string(gt.Bytes)
+			if len(s) >= 8 {
+				return s[0:4] + "-" + s[4:6] + "-" + s[6:8]
+			}
+		}
+	}
+	return ""
+}
+
+func extractID(s string) (id string, idType string) {
 	v := strings.ToUpper(normalizeSpace(s))
 	v = strings.TrimPrefix(v, "IDCES-")
 	v = strings.TrimPrefix(v, "IDESP-")
@@ -140,13 +189,13 @@ func extractID(s string) string {
 	}
 	switch {
 	case reDNI.MatchString(v):
-		return reDNI.FindString(v)
+		return reDNI.FindString(v), "DNI"
 	case reNIE.MatchString(v):
-		return reNIE.FindString(v)
+		return reNIE.FindString(v), "NIE"
 	case reCIF.MatchString(v):
-		return reCIF.FindString(v)
+		return reCIF.FindString(v), "CIF"
 	default:
-		return ""
+		return "", ""
 	}
 }
 
